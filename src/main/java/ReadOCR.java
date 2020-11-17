@@ -22,7 +22,7 @@ public class ReadOCR {
         Tesseract reader = new Tesseract();
         reader.setDatapath("C:\\Users\\ibrahim\\Desktop\\tessdata") ;
 //        reader.setLanguage("eng");
-//        reader.setHocr(true);
+        reader.setHocr(true);
         return reader;
     }
     private static Ocr getAspriseOcr(){
