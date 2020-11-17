@@ -13,6 +13,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Arrays;
 
+//test commit 2 :todo delete!
 public class ReadOCR {
     //Create an OCR reader using Tesseract package
     //set training data to improve OCR accuracy
