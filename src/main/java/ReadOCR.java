@@ -1,5 +1,3 @@
-import com.asprise.ocr.Ocr;
-import net.sourceforge.tess4j.OCRResult;
 import net.sourceforge.tess4j.Tesseract;
 import net.sourceforge.tess4j.TesseractException;
 
@@ -13,25 +11,17 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Arrays;
 
-//test commit 2 :todo delete!
 public class ReadOCR {
     //Create an OCR reader using Tesseract package
     //set training data to improve OCR accuracy
-    //set language to english (default)
-    //enable HOCR output to maintain the same structure as the scanned image (even though it doesn't work correctly)
     private static Tesseract getTess(){
         Tesseract reader = new Tesseract();
         reader.setDatapath("C:\\Users\\ibrahim\\Desktop\\tessdata") ;
-//        reader.setLanguage("eng");
-//        reader.setHocr(true);
         return reader;
     }
-    private static Ocr getAspriseOcr(){
-        Ocr.setUp();
-        Ocr reader = new Ocr();
-        reader.startEngine("eng", Ocr.SPEED_FASTEST);
-        return reader;
-    }
+
+    //todo: maybe change return value to String? maybe instead of printStackTrace return the error?
+    // we need to return the OCR_result or <a short description of the exception>
 
     public static void main(String[] args) {
         //download image from URL
@@ -57,7 +47,10 @@ public class ReadOCR {
         try {
             //perform OCR
             String OCR_result = my_reader.doOCR(img);
+
+            //todo: delete print
             System.out.println(OCR_result);
+
             //open the result.html file
             Path file = Paths.get("C:\\Users\\ibrahim\\Desktop\\tessimages\\resultTess.html");
             //write both image and OCRed text into result.html file
@@ -66,22 +59,6 @@ public class ReadOCR {
         } catch (TesseractException | IOException e) {
             e.printStackTrace();
         }
-
-//        //ASPRISE PART
-//        //create my OCR reader
-//        Ocr myreader = getAspriseOcr();
-//        String res = myreader.recognize(new URL[]{url},
-//                Ocr.RECOGNIZE_TYPE_TEXT,
-//                Ocr.OUTPUT_FORMAT_XML);
-//        Path file = Paths.get("C:\\Users\\ibrahim\\Desktop\\tessimages\\resultAsprise.html");
-//        //write both image and OCRed text into result.html file
-//        String[] to_write = {"<img src=" + image_url + ">","<div>"+ res+"</div>"};
-//        try {
-//            Files.write(file, Arrays.asList(to_write));
-//        } catch (IOException e) {
-//            e.printStackTrace();
-//        }
-//        myreader.stopEngine();
-
     }
 }
+
