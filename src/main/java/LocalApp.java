@@ -55,7 +55,7 @@ public class LocalApp {
                         .build());*/
 
 
-                //send the location of the file in s3 to the queue (using $ as a delimiter)
+                //send the location of the file in s3 to the sqs queue (using $ as a delimiter)
                 sendMessage(queueUrl, new_task + "$" + inputS3Path);
 
         /* todo: Checking if a Manager Node is Active
