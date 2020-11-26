@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/cloudOCR.iml" filepath="$PROJECT_DIR$/.idea/cloudOCR.iml" />
+      <module fileurl="file://$PROJECT_DIR$/cloudOCR.iml" filepath="$PROJECT_DIR$/cloudOCR.iml" />
     </modules>
   </component>
 </project>
