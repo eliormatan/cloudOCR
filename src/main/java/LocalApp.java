@@ -19,7 +19,7 @@ public class LocalApp {
     private static S3Client s3;
     private static SqsClient sqs;
     private static int filesRatio;
-    private static final String amiId = "ami-076515f20540e6e0b";
+    private static final String amiId = "ami-076515f20540e6e0b"; //includes java
 
 
     public static void main(String[] args) {
@@ -218,23 +218,32 @@ public class LocalApp {
 
     private static String getUserDataScript() {
         //todo: write USER DATA script string
+            String userData =
+                    //run the file with bash
+                    "#!/bin/bash\n"+
+                    //install maven
+                    "echo installing maven\n" +
+                    "sudo apt-get install maven\n"+
+                    "mvn -version" +
+                    "echo download jar file\r\n" +
 
-            String userData = "#!/bin/bash\n";
-            //???
-            userData = userData + "java -jar Manager.jar";
+                    //todo: upload jars to internet and put the location do download here
+                    //maybe use https://gofile.io/uploadFiles (it stays 10 days in the web
+                    //,started counting from the last day it was downloaded)
+                    // also can use github or aws s3
+                    //todo: use wget to download jars (https://linuxize.com/post/wget-command-examples/)
+                    // "wget ..."
+                    //example: wget http://www.cs.bgu.ac.il/~dsp211/Main -O dsp.html
+                    // will download the content at http://www.cs.bgu.ac.il/~dsp211/Main and save it to a file named dsp.html
 
-      /*  String userData = "#!/bin/bash\n" +
-                "aws s3 cp s3://" + JAR_BUCKET_NAME + "/manager.jar manager.jar\n" +
-                "java -jar manager.jar"; */
+                    //this ami should include java already
+                    //run Manager
+                    "echo running Manager\r\n" +
+                    "java -jar Manager.jar";
 
-        /*public static final String USER_DATA_MANAGER = "#!/bin/bash\n" +
-                "sudo mkdir /home/ass/\n" +
-                "sudo aws s3 cp s3://the-gabay-jar/Manager.jar /home/ass/\n" +
-                "sudo /usr/bin/java -jar /home/ass/Manager.jar\n" +
-                "shutdown -h now";*/
-
-
-//https://aws.amazon.com/getting-started/hands-on/backup-to-s3-cli/
+            /* basic commands
+            //https://dev.to/awwsmm/101-bash-commands-and-tips-for-beginners-to-experts-30je
+             */
 
         return userData;
     }
