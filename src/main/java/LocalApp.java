@@ -58,24 +58,8 @@ public class LocalApp {
             s3.putObject(PutObjectRequest.builder().bucket(bucket).key(input).acl(ObjectCannedACL.PUBLIC_READ).build(),
                     Paths.get(input));
 
-                //get s3 input url - todo:delete
-                /*s3.getUrl(bucket, input).toExternalForm();
-                GetUrlRequest request = GetUrlRequest.builder().bucket(bucket).key(key).build();
-                String inputS3Path = s3.getUrl(bucket, key).toExternalForm();
-                String inputS3Pat2h = s3.utilities().getUrl(request).toExternalForm();
-
-                 S3Utilities utilities = S3Utilities.builder().region(Region.US_WEST_2).build();
-                 GetUrlRequest request2 = GetUrlRequest.builder().bucket("foo-bucket").key("key-without-spaces").build();
-                 URL url = utilities.getUrl(request);
-
-                S3Client s3client = S3Client.create();
-                S3Utilities utilities2 = s3client.utilities();
-                GetUrlRequest request3 = GetUrlRequest.builder().bucket("foo-bucket").key("key-without-spaces").build();
-                URL url = utilities.getUrl(request);*/
-
             //send the location of the file in s3 to the queue (using $ as a delimiter)
             sendMessage(l2m_qUrl, new_task + "$" + bucket + "$" + input + "$" + localId + "$" + filesRatio);
-
 
             //check if a 'Manager' node is active on the EC2 cloud. If it is not, the application will start the manager node.
             startManager();
@@ -174,7 +158,7 @@ public class LocalApp {
             ec2 = Ec2Client.create();
 
             RunInstancesRequest runRequest = RunInstancesRequest.builder()
-                    .instanceType(InstanceType.T1_MICRO)
+                    .instanceType(InstanceType.T2_MICRO)
                     .imageId(amiId)
                     .maxCount(1)
                     .minCount(1)

@@ -12,32 +12,35 @@ import java.nio.file.Paths;
 import java.util.Arrays;
 
 public class ReadOCR {
+
     //Create an OCR reader using Tesseract package
     //set training data to improve OCR accuracy
     private static Tesseract getTess(){
         Tesseract reader = new Tesseract();
-        reader.setDatapath("C:\\Users\\ibrahim\\Desktop\\tessdata") ;
+        //todo: to which location set the data path? do we need to download eng.traineddata before?
+        //reader.setDatapath("C:\\Users\\ibrahim\\Desktop\\tessdata") ;
         return reader;
     }
 
-    //todo: maybe change return value to String? maybe instead of printStackTrace return the error?
-    // we need to return the OCR_result or <a short description of the exception>
+    public static String main(String[] args) {
 
-    public static void main(String[] args) {
+        String image_url=args[1];
+        String output=image_url+"$";
+
         //download image from URL
-        String image_url = "http://www.columbiamt.com/CMT-Marking-Stamps/images/OCR-A-Font.gif";
+
         URL url = null;
         try {
             url = new URL(image_url);
         } catch (MalformedURLException e) {
-            e.printStackTrace();
+            output+=e.getMessage();
         }
 
         BufferedImage img = null;
         try {
             img = ImageIO.read(url);
         } catch (IOException e) {
-            e.printStackTrace();
+            output+=e.getMessage();
         }
 
         //TESSERACT PART
@@ -48,17 +51,19 @@ public class ReadOCR {
             //perform OCR
             String OCR_result = my_reader.doOCR(img);
 
-            //todo: delete print
-            System.out.println(OCR_result);
-
-            //open the result.html file
+         //todo: do this part in the Manager(worker send him url+result/error)
+          /*    //open the result.html file
+            //todo: from which location get the data path?
             Path file = Paths.get("C:\\Users\\ibrahim\\Desktop\\tessimages\\resultTess.html");
             //write both image and OCRed text into result.html file
             String[] to_write = {"<img src=" + image_url + ">", OCR_result};
             Files.write(file, Arrays.asList(to_write));
-        } catch (TesseractException | IOException e) {
-            e.printStackTrace();
+          */
+            output+=OCR_result;
+        } catch (TesseractException e) {
+            output+=e.getMessage();
         }
+        return output;
     }
 }
 
