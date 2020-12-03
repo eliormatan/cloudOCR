@@ -1,79 +1,81 @@
-import software.amazon.awssdk.core.ResponseInputStream;
+import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.ec2.Ec2Client;
+import software.amazon.awssdk.services.ec2.model.*;
+import software.amazon.awssdk.services.ec2.model.Tag;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.*;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.*;
-import software.amazon.awssdk.services.sqs.model.CreateQueueRequest;
-import software.amazon.awssdk.services.sqs.model.DeleteMessageRequest;
-import software.amazon.awssdk.services.sqs.model.GetQueueUrlRequest;
-import software.amazon.awssdk.services.sqs.model.Message;
-import software.amazon.awssdk.services.sqs.model.QueueNameExistsException;
-import software.amazon.awssdk.services.sqs.model.ReceiveMessageRequest;
-import software.amazon.awssdk.services.sqs.model.SendMessageBatchRequest;
-import software.amazon.awssdk.services.sqs.model.SendMessageBatchRequestEntry;
-import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
 
 import java.io.*;
 import java.net.URL;
 import java.nio.file.Paths;
-import java.util.Date;
+import java.util.Base64;
 import java.util.List;
 
 public class Manager {
     private static S3Client s3;
     private static SqsClient sqs;
+    private static Ec2Client ec2;
+    private static final String amiId = "ami-076515f20540e6e0b";
     private static final String local2ManagerQ = "local2ManagerQ";
     private static final String manager2LocalQ = "manager2LocalQ";
     private static final String manager2WorkerQ = "manager2WorkerQ";
     private static final String worker2ManagerQ = "worker2ManagerQ";
-    private static final String new_image_task = "new_image_task";
-    private static final String done_ocr_task = "done_ocr_task";
-
+    private static final String new_image_task = "new image task";
+    private static final String done_ocr_task = "done ocr task";
+    private static final String new_task = "new task";
+    private static final String done_task = "done task";
+    private static List<String> workerIds;
 
     public static void main (String args[]) {
+
         //todo: maybe add threads?
 
         Region region = Region.US_WEST_2;
         sqs = SqsClient.builder().region(region).build();
         s3 = S3Client.builder().region(region).build();
 
-        //todo: to get the queue that sends new tasks from local app to manager we need to use the same name ,
-        // queue access by name, i called it local2ManagerQ
-
+        //to get the queue that sends new tasks from local app to manager we need to use the same name ,
+        //queue access by name, i called it local2ManagerQ
         //local 2 manager queue url = local2ManagerQUrl
         String local2ManagerQUrl = getQueueRequestAndGetUrl(local2ManagerQ);
         //manager 2 local queue url = manager2LocalQUrl
         String manager2LocalQUrl = getQueueRequestAndGetUrl(manager2LocalQ);
-
 
         //create queues to send & receive messages from workers
         //createQueueRequestAndGetUrl function is taken from LocalApp
         String manager2WorkerQUrl = createQueueRequestAndGetUrl(manager2WorkerQ);
         String worker2ManagerQUrl = createQueueRequestAndGetUrl(worker2ManagerQ);
 
-        boolean terminate = false;
         String newTaskFileLink;
         String bucket;
         String key;
+        int linesPerWorker;
+        int requiredWorkers;
         String localId;
+        boolean terminate = false;
         while(!terminate){
             //STEP 4: Manager downloads list of images
-            //receive messages from localApp
+            //receive messages from localApp queue
             ReceiveMessageRequest receiveRequest = ReceiveMessageRequest.builder()
                     .queueUrl(local2ManagerQUrl)
                     .build();
             List<Message> messages = sqs.receiveMessage(receiveRequest).messages();
             for (Message message : messages) {
                 String messageBody = message.body();
-                //todo: define how the new task message is sent from local app to the manager,
-                // should receive bucket, key, and local app id to access new task file in s3,
-                // in case of multiple local apps, each local app will have its own queues,
-                // based on its own ID
 
-                //todo: terminate or not? how to receive terminate message
-
-                //todo: split new task messages and extract needed info such as bucket, key, localID
+                //split message and extract needed info
+                //message should be "new task$bucket$key$n$localID$terminate"
+                String[] splitMessage = messageBody.split("$");
+                bucket = splitMessage[1];
+                key = splitMessage[2];
+                linesPerWorker = Integer.parseInt(splitMessage[3]);
+                localId = splitMessage[4];
+                if (splitMessage.length > 5 && splitMessage[5] == "terminate"){
+                    terminate = true;
+                }
 
                 //open/create input file and name it according to the localapp ID that sent it
                 try {
@@ -127,12 +129,81 @@ public class Manager {
                         .receiptHandle(message.receiptHandle())
                         .build();
                 sqs.deleteMessage(deleteRequest);
-
+                requiredWorkers = numberOfLines / linesPerWorker;
                 //STEP 6: Manager bootstraps nodes to process messages
-                //todo: start workers and bootstrap them
+                //start workers and bootstrap them
+                startOrUpdateWorkers(requiredWorkers);
 
+                //STEP 11: Manager reads all the Workers' messages from SQS and creates one summary file
+                //STEP 12: Manager uploads summary file to S3
+                //STEP 13: Manager posts an SQS message about summary file
+                receiveDoneOcrTasks(numberOfLines, localId, bucket);
             }
         }
+        //terminate workers
+        TerminateInstancesRequest termRequest = TerminateInstancesRequest.builder().instanceIds(workerIds).build();
+        TerminateInstancesResponse termResponse = ec2.terminateInstances(termRequest);
+
+        //delete queues
+        sqs.deleteQueue(DeleteQueueRequest.builder().queueUrl(worker2ManagerQUrl).build()); //worker2manager
+        sqs.deleteQueue(DeleteQueueRequest.builder().queueUrl(manager2WorkerQUrl).build()); //manager2worker
+
+        //terminate Manager
+        DescribeInstancesRequest request = DescribeInstancesRequest.builder().filters(Filter.builder().name("tag:Manager").build()).build();
+        DescribeInstancesResponse response = ec2.describeInstances(request);
+        String managerId = response.reservations().get(0).instances().get(0).instanceId();
+        TerminateInstancesRequest termManagerRequest = TerminateInstancesRequest.builder().instanceIds(managerId).build();
+        TerminateInstancesResponse termManagerResponse = ec2.terminateInstances(termManagerRequest);
+    }
+
+    private static void startOrUpdateWorkers(int requiredWorkers) {
+        //manager is being run on EC2, so localApp should upload both Manager.jar AND worker.jar
+        //to predefined s3 buckets and known keys.
+        //check if number of workers is as required
+        DescribeInstancesRequest request = DescribeInstancesRequest.builder().filters(Filter.builder().name("tag:Worker").build()).build();
+        DescribeInstancesResponse response = ec2.describeInstances(request);
+        //this is the number of workers, not sure if correct
+        int currWorkers = (int) response.reservations().stream().count();
+        if(currWorkers < 19 && currWorkers < requiredWorkers){
+            int neededWorkers = requiredWorkers - currWorkers;
+            ec2 = Ec2Client.create();
+            Tag tag = Tag.builder()
+                    .key("Worker")
+                    .value("Worker")
+                    .build();
+            TagSpecification tags = TagSpecification.builder().tags(tag).build();
+
+            RunInstancesRequest runRequest = RunInstancesRequest.builder()
+                    .instanceType(InstanceType.T2_MICRO)
+                    .imageId(amiId)
+                    .maxCount(neededWorkers)
+                    .minCount(1)
+                    .userData(Base64.getEncoder().encodeToString(getWorkerDataScript().getBytes()))
+                    .tagSpecifications(tags)
+                    .build();
+
+
+            RunInstancesResponse runResponse = ec2.runInstances(runRequest);
+            List<Instance> instances = runResponse.instances();
+            for (int i = 0; i < instances.size(); i++ ){
+                workerIds.add(instances.get(i).instanceId());
+            }
+        }
+
+    }
+
+    private static String getWorkerDataScript(){
+        String workerData=
+                "#!/bin/bash\n"+
+                "echo installing maven\n" +
+                "sudo apt-get install maven\n"+
+                "mvn -version" +
+                "echo download jar file\r\n" +
+                //we can upload jar files to s3 and download them using wget like so:
+                // wget "https://<bucket>.s3.amazonaws.com/<key>
+                "echo running Worker\r\n" +
+                "java -jar Worker.jar";
+        return workerData;
     }
     //send new image task to workers
     private static void queueNewImageTask(String queue, String line, String localId){
@@ -144,8 +215,50 @@ public class Manager {
         sqs.sendMessage(sendMessageRequest);
     }
 
-    //todo: add a function that receives done OCR task from workers
-    //todo: add a function to merge outputs from workers
+    //receiveDoneOcrTasks
+    //receive a finished OCR task from a worker
+    public static void receiveDoneOcrTasks(int lines, String localId, String bucket) {
+        int lineCount = lines;
+        String output = "output" + localId + ".html";
+        while (lineCount != 0) {
+            ReceiveMessageRequest receiveRequest = ReceiveMessageRequest.builder()
+                    .queueUrl(worker2ManagerQ)
+                    .build();
+            List<Message> messages = sqs.receiveMessage(receiveRequest).messages();
+            //read all done ocr tasks from worker2manager queue and append them all in output file
+            for (Message m : messages) {
+                String body = m.body();
+                //message from worker should be done_ocr_task$localId$URL$OCR
+                String[] splitMessage = body.split("$",3);
+                String taskId = splitMessage[1];
+                String url = splitMessage[2];
+                String ocr = splitMessage[3];
+                if (taskId.equals(localId)) {
+                    writeToOutput(output, url, ocr);
+                    lineCount--;
+                    DeleteMessageRequest deleteRequest = DeleteMessageRequest.builder()
+                            .queueUrl(worker2ManagerQ)
+                            .receiptHandle(m.receiptHandle())
+                            .build();
+                    sqs.deleteMessage(deleteRequest);
+                }
+            }
+        }
+        //upload output summary file to s3 and send sqs message to localapp
+        s3.putObject(PutObjectRequest.builder().bucket(bucket).key(output).acl(ObjectCannedACL.PUBLIC_READ)
+                        .build(),
+                RequestBody.fromFile(Paths.get(output)));
+        SendMessageRequest messageRequest = SendMessageRequest.builder()
+                .queueUrl(manager2LocalQ)
+                .messageBody(done_task + "$" + localId)
+                .delaySeconds(5)
+                .build();
+        sqs.sendMessage(messageRequest);
+        //after output is uploaded to s3, delete it since we no longer need it
+        File f = new File(output);
+        f.delete();
+    }
+
     private static String createQueueRequestAndGetUrl(String queue) {
         try {
             CreateQueueRequest request = CreateQueueRequest.builder()
@@ -166,5 +279,16 @@ public class Manager {
                 .build();
         String queueUrl = sqs.getQueueUrl(getQueueRequest).queueUrl();
         return queueUrl;
+    }
+
+    private static void writeToOutput(String output, String url, String ocr){
+        try {
+            FileWriter writer = new FileWriter(output,true);
+            writer.write("<img src=" + url + ">");
+            writer.write(ocr);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
     }
 }
