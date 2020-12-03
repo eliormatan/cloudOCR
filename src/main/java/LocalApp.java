@@ -21,8 +21,9 @@ public class LocalApp {
     private static int filesRatio;
     private static final String amiId = "ami-076515f20540e6e0b"; //includes java
 
-
     public static void main(String[] args) {
+        //todo: how to use cardinals/keyName/my aws credits?
+
         final String input = args[1];
         final String output = args[2];
         filesRatio = Integer.parseInt(args[3]);
@@ -85,8 +86,6 @@ public class LocalApp {
                 }
             }
 
-            //todo: make sure the summary file in s3 (uploaded by the manager)is already in html format
-
             // download summary file from S3 and write it to output file
             s3.getObject(GetObjectRequest.builder().bucket(bucket).key(outputS3Path).build(),
                     ResponseTransformer.toFile(Paths.get(output)));
@@ -94,10 +93,20 @@ public class LocalApp {
             if (terminate)
                 sendMessage(l2m_qUrl, "terminate");
 
+            //delete sqs queues
+            deleteSQSQueue(local2ManagerQ);
+            deleteSQSQueue(manager2LocalQ);
+
+            //delete s3 bucket
+            deleteBucket(bucket);
+
         } catch (Exception e) {
             e.printStackTrace();
+            System.exit(1);
         }
     }
+
+
 
     private static void createBucket(String bucket, Region region) {
         s3.createBucket(CreateBucketRequest
@@ -216,8 +225,34 @@ public class LocalApp {
         return isActive;
     }
 
+    public static void deleteSQSQueue(String queueName) {
+
+        try {
+
+            GetQueueUrlRequest getQueueRequest = GetQueueUrlRequest.builder()
+                    .queueName(queueName)
+                    .build();
+
+            String queueUrl = sqs.getQueueUrl(getQueueRequest).queueUrl();
+
+            DeleteQueueRequest deleteQueueRequest = DeleteQueueRequest.builder()
+                    .queueUrl(queueUrl)
+                    .build();
+
+            sqs.deleteQueue(deleteQueueRequest);
+
+        } catch (SqsException e) {
+            System.err.println(e.awsErrorDetails().errorMessage());
+        }
+    }
+
+    private static void deleteBucket(String bucket) {
+        DeleteBucketRequest deleteBucketRequest = DeleteBucketRequest.builder().bucket(bucket).build();
+        s3.deleteBucket(deleteBucketRequest);
+    }
+
+
     private static String getUserDataScript() {
-        //todo: write USER DATA script string
             String userData =
                     //run the file with bash
                     "#!/bin/bash\n"+
@@ -226,13 +261,10 @@ public class LocalApp {
                     "sudo apt-get install maven\n"+
                     "mvn -version" +
                     "echo download jar file\r\n" +
-
-                    //todo: upload jars to internet and put the location do download here
-                    //maybe use https://gofile.io/uploadFiles (it stays 10 days in the web
-                    //,started counting from the last day it was downloaded)
-                    // also can use github or aws s3
-                    //todo: use wget to download jars (https://linuxize.com/post/wget-command-examples/)
-                    // "wget ..."
+                    //todo:download tessarct jar
+                    //todo: download worker+manager+readocr jars
+                    // use wget to download jars (https://linuxize.com/post/wget-command-examples/)
+                    //"wget ..."
                     //example: wget http://www.cs.bgu.ac.il/~dsp211/Main -O dsp.html
                     // will download the content at http://www.cs.bgu.ac.il/~dsp211/Main and save it to a file named dsp.html
 

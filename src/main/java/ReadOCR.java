@@ -19,9 +19,6 @@ public class ReadOCR {
     //set training data to improve OCR accuracy
     private static Tesseract getTess(){
         Tesseract reader = new Tesseract();
-        //reader.setDatapath("C:\\Users\\ibrahim\\Desktop\\tessdata") ;
-        //todo: check if it works
-        // Maven build bundles English data
          File tessDataFolder = LoadLibs.extractTessResources("tessdata");
          reader.setDatapath(tessDataFolder.getPath());
         return reader;
@@ -55,15 +52,6 @@ public class ReadOCR {
         try {
             //perform OCR
             String OCR_result = my_reader.doOCR(img);
-
-         //todo: do this part in the Manager(worker send him url+result/error)
-          /*    //open the result.html file
-            //todo: from which location get the data path?
-            Path file = Paths.get("C:\\Users\\ibrahim\\Desktop\\tessimages\\resultTess.html");
-            //write both image and OCRed text into result.html file
-            String[] to_write = {"<img src=" + image_url + ">", OCR_result};
-            Files.write(file, Arrays.asList(to_write));
-          */
             output+=OCR_result;
         } catch (TesseractException e) {
             output+=e.getMessage();

@@ -54,7 +54,6 @@ public class Worker {
 
     }
 
-    //todo: optimize - the function is duplicated from manager  //maybe create sqs package/class
     private static String getQueueRequestAndGetUrl(String queue) {
         GetQueueUrlRequest getQueueRequest = GetQueueUrlRequest.builder()
                 .queueName(queue)
@@ -63,7 +62,6 @@ public class Worker {
         return queueUrl;
     }
 
-    //todo: optimize - the function is duplicated from localApp
     private static List<Message> receiveMessages(String queueUrl) {
         ReceiveMessageRequest receiveRequest = ReceiveMessageRequest.builder()
                 .queueUrl(queueUrl)
@@ -72,7 +70,6 @@ public class Worker {
         return sqs.receiveMessage(receiveRequest).messages();
     }
 
-    //todo: optimize - the function is duplicated from localApp
     private static void deleteMessage(String queueUrl, Message message) {
         DeleteMessageRequest deleteRequest = DeleteMessageRequest.builder()
                 .queueUrl(queueUrl)
@@ -81,7 +78,6 @@ public class Worker {
         sqs.deleteMessage(deleteRequest);
     }
 
-    //todo: optimize - the function is duplicated from localApp
     private static void sendMessage(String queueUrl, String message) {
         SendMessageRequest send_msg_request = SendMessageRequest.builder()
                 .queueUrl(queueUrl)
