@@ -24,11 +24,12 @@ public class LocalApp {
     public static void main(String[] args) {
         //todo: how to use cardinals/keyName/my aws credits?
 
-        final String input = args[1];
-        final String output = args[2];
-        filesRatio = Integer.parseInt(args[3]);
-        final Region region = Region.US_WEST_2;
-        final String bucket = "bucket_ocr";
+        final String input = args[0];
+        final String output = args[1];
+        filesRatio = Integer.parseInt(args[2]);
+        Region region = Region.US_EAST_1;
+        final String bucket = "bucket"+System.currentTimeMillis();
+        final String key = "input.txt";
         final String local2ManagerQ = "local2ManagerQ";
         final String manager2LocalQ = "manager2LocalQ";
         final String localId = "local"+System.currentTimeMillis();
@@ -41,7 +42,7 @@ public class LocalApp {
         boolean done = false;
         boolean terminate = args.length > 4 && args[4].equals("terminate");
 
-        if (args.length < 4)
+        if (args.length < 3)
             throw new IllegalArgumentException(arguments);
 
 
@@ -49,56 +50,61 @@ public class LocalApp {
             //define s3
             s3 = S3Client.builder().region(region).build();
             createBucket(bucket, region);
-
+            printWithColor("created bucket "+bucket);
             //define sqs
             sqs = SqsClient.builder().region(region).build();
             String l2m_qUrl = createQueueRequestAndGetUrl(local2ManagerQ);
             String m2l_qUrl = createQueueRequestAndGetUrl(manager2LocalQ);
+            printWithColor("created local2manager and manager2local queues: "+l2m_qUrl+" "+m2l_qUrl);
 
             //upload the input file to s3
-            s3.putObject(PutObjectRequest.builder().bucket(bucket).key(input).acl(ObjectCannedACL.PUBLIC_READ).build(),
+            s3.putObject(PutObjectRequest.builder().bucket(bucket).key(key).acl(ObjectCannedACL.PUBLIC_READ).build(),
                     Paths.get(input));
+            printWithColor("uploaded file to s3 https://" + bucket + ".s3.amazonaws.com/" + key);
 
             //send the location of the file in s3 to the queue (using $ as a delimiter)
-            sendMessage(l2m_qUrl, new_task + "$" + bucket + "$" + input + "$" + localId + "$" + filesRatio);
+            sendMessage(l2m_qUrl, new_task + "$" + bucket + "$" + key + "$" + localId + "$" + filesRatio);
+            printWithColor("sent new task to local2manager queue "+new_task + "$" + bucket + "$" + key + "$" + localId + "$" + filesRatio);
 
             //check if a 'Manager' node is active on the EC2 cloud. If it is not, the application will start the manager node.
-            startManager();
-
-            while (!done) {
-                // receive messages from the queue
-                List<Message> messages = receiveMessages(m2l_qUrl);
-                for (Message m : messages) {
-                    String[] bodyArr = m.body().split("$");
-                    //check for 'done task' message
-                    if (bodyArr[0].equals(done_task)) {
-                        //delete message
-                        deleteMessage(m2l_qUrl, m);
-                        //get s3 location of the output file
-                        outputS3Path = bodyArr[1];
-                        done = true;
-                    }
-                }
-                try {
-                    Thread.sleep(1000);
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
-            }
-
-            // download summary file from S3 and write it to output file
-            s3.getObject(GetObjectRequest.builder().bucket(bucket).key(outputS3Path).build(),
-                    ResponseTransformer.toFile(Paths.get(output)));
-
-            if (terminate)
-                sendMessage(l2m_qUrl, "terminate");
+//            startManager();
+//
+//            while (!done) {
+//                // receive messages from the queue
+//                List<Message> messages = receiveMessages(m2l_qUrl);
+//                for (Message m : messages) {
+//                    String[] bodyArr = m.body().split("$");
+//                    //check for 'done task' message
+//                    if (bodyArr[0].equals(done_task)) {
+//                        //delete message
+//                        deleteMessage(m2l_qUrl, m);
+//                        //get s3 location of the output file
+//                        outputS3Path = bodyArr[1];
+//                        done = true;
+//                    }
+//                }
+//                try {
+//                    Thread.sleep(1000);
+//                } catch (InterruptedException e) {
+//                    e.printStackTrace();
+//                }
+//            }
+//
+//            // download summary file from S3 and write it to output file
+//            s3.getObject(GetObjectRequest.builder().bucket(bucket).key(outputS3Path).build(),
+//                    ResponseTransformer.toFile(Paths.get(output)));
+//
+//            if (terminate)
+//                sendMessage(l2m_qUrl, "terminate");
 
             //delete sqs queues
             deleteSQSQueue(local2ManagerQ);
             deleteSQSQueue(manager2LocalQ);
-
+            printWithColor("loca2manager and manager2local queues deleted");
             //delete s3 bucket
             deleteBucket(bucket);
+            printWithColor("deleted bucket "+bucket);
+
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -114,7 +120,7 @@ public class LocalApp {
                 .bucket(bucket)
                 .createBucketConfiguration(
                         CreateBucketConfiguration.builder()
-                                .locationConstraint(region.id())
+
                                 .build())
                 .build());
     }
@@ -246,11 +252,38 @@ public class LocalApp {
         }
     }
 
-    private static void deleteBucket(String bucket) {
-        DeleteBucketRequest deleteBucketRequest = DeleteBucketRequest.builder().bucket(bucket).build();
-        s3.deleteBucket(deleteBucketRequest);
-    }
 
+
+    private static void deleteBucket(String bucket) {
+        try {
+            // To delete a bucket, all the objects in the bucket must be deleted first
+            ListObjectsV2Request listObjectsV2Request = ListObjectsV2Request.builder().bucket(bucket).build();
+            ListObjectsV2Response listObjectsV2Response;
+
+            do {
+                listObjectsV2Response = s3.listObjectsV2(listObjectsV2Request);
+                for (S3Object s3Object : listObjectsV2Response.contents()) {
+                    s3.deleteObject(DeleteObjectRequest.builder()
+                            .bucket(bucket)
+                            .key(s3Object.key())
+                            .build());
+                }
+
+                listObjectsV2Request = ListObjectsV2Request.builder().bucket(bucket)
+                        .continuationToken(listObjectsV2Response.nextContinuationToken())
+                        .build();
+
+            } while(listObjectsV2Response.isTruncated());
+            // snippet-end:[s3.java2.bucket_deletion.delete_bucket]
+
+            DeleteBucketRequest deleteBucketRequest = DeleteBucketRequest.builder().bucket(bucket).build();
+            s3.deleteBucket(deleteBucketRequest);
+
+        } catch (S3Exception e) {
+            System.err.println(e.awsErrorDetails().errorMessage());
+            System.exit(1);
+        }
+    }
 
     private static String getUserDataScript() {
             String userData =
@@ -280,7 +313,12 @@ public class LocalApp {
         return userData;
     }
 
-
+    public static void printWithColor (String string){
+        final String ANSI_BLACK = "\u001B[30m";
+        final String ANSI_RESET = "\u001B[0m";
+        final String ANSI_WHITE_BACKGROUND = "\u001B[47m";
+        System.out.println(ANSI_WHITE_BACKGROUND +ANSI_BLACK + string + ANSI_RESET);
+    }
 
 
 }
