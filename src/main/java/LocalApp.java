@@ -9,9 +9,14 @@ import software.amazon.awssdk.services.s3.model.*;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.*;
 
+import java.io.IOException;
 import java.nio.file.Paths;
 import java.util.Base64;
 import java.util.List;
+import java.util.logging.FileHandler;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+import java.util.logging.SimpleFormatter;
 
 public class LocalApp {
 
@@ -21,8 +26,18 @@ public class LocalApp {
     private static int filesRatio;
     private static final String amiId = "ami-076515f20540e6e0b"; //includes java
 
-    public static void main(String[] args) {
-        //todo: how to use cardinals/keyName/my aws credits?
+
+    private static Logger logger = Logger.getLogger(LocalApp.class.getName());
+
+
+        public static void main(String[] args) {
+            try {
+                initLogger("LocalAppLogger");
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+
+            //todo: how to use cardinals/keyName/my aws credits?
 
         final String input = args[0];
         final String output = args[1];
@@ -68,34 +83,35 @@ public class LocalApp {
 
             //check if a 'Manager' node is active on the EC2 cloud. If it is not, the application will start the manager node.
 //            startManager();
-//
-//            while (!done) {
-//                // receive messages from the queue
-//                List<Message> messages = receiveMessages(m2l_qUrl);
-//                for (Message m : messages) {
-//                    String[] bodyArr = m.body().split("$");
-//                    //check for 'done task' message
-//                    if (bodyArr[0].equals(done_task)) {
-//                        //delete message
-//                        deleteMessage(m2l_qUrl, m);
-//                        //get s3 location of the output file
-//                        outputS3Path = bodyArr[1];
-//                        done = true;
-//                    }
-//                }
-//                try {
-//                    Thread.sleep(1000);
-//                } catch (InterruptedException e) {
-//                    e.printStackTrace();
-//                }
-//            }
-//
-//            // download summary file from S3 and write it to output file
-//            s3.getObject(GetObjectRequest.builder().bucket(bucket).key(outputS3Path).build(),
-//                    ResponseTransformer.toFile(Paths.get(output)));
-//
-//            if (terminate)
-//                sendMessage(l2m_qUrl, "terminate");
+
+            while (!done) {
+                // receive messages from the queue
+                List<Message> messages = receiveMessages(m2l_qUrl);
+                for (Message m : messages) {
+                    String[] bodyArr = m.body().split("\\$");
+                    //check for 'done task' message
+                    if (bodyArr[0].equals(done_task)) {
+                        //delete message
+                        deleteMessage(m2l_qUrl, m);
+                        //get s3 location of the output file
+                        outputS3Path = bodyArr[1];
+                        done = true;
+                    }
+                }
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+
+            // download summary file from S3 and write it to output file
+            s3.getObject(GetObjectRequest.builder().bucket(bucket).key(outputS3Path).build(),
+                    ResponseTransformer.toFile(Paths.get(output)));
+
+            if (terminate)
+                sendMessage(l2m_qUrl, "terminate");
+
 
             //delete sqs queues
             deleteSQSQueue(local2ManagerQ);
@@ -104,6 +120,7 @@ public class LocalApp {
             //delete s3 bucket
             deleteBucket(bucket);
             printWithColor("deleted bucket "+bucket);
+
 
 
         } catch (Exception e) {
@@ -289,19 +306,13 @@ public class LocalApp {
             String userData =
                     //run the file with bash
                     "#!/bin/bash\n"+
-                    //install maven
-                    "echo installing maven\n" +
-                    "sudo apt-get install maven\n"+
-                    "mvn -version" +
                     "echo download jar file\r\n" +
                     //todo: download worker+manager+tessarct jars
                     //use wget to download jars (https://linuxize.com/post/wget-command-examples/)
                     //"wget ..."
                     //example: wget http://www.cs.bgu.ac.il/~dsp211/Main -O dsp.html
                     // will download the content at http://www.cs.bgu.ac.il/~dsp211/Main and save it to a file named dsp.html
-
-                    //this ami should include java already
-                    //run Manager
+                    // run Manager
                     "echo running Manager\r\n" +
                     "java -jar Manager.jar";
 
@@ -311,15 +322,46 @@ public class LocalApp {
 
         return userData;
     }
+    //todo: upload code
+  /*  private static void uploadCode(){
+        try {
+            s3.createBucket(CreateBucketRequest
+                    .builder().bucket("kfirorel")
+                    .createBucketConfiguration(CreateBucketConfiguration.builder()
+                            .locationConstraint(region.id()).build()).build());
+            s3.putObject(PutObjectRequest.builder()
+                            .bucket("kfirorel")
+                            .key("Manager.zip").acl(ObjectCannedACL.PUBLIC_READ)
+                            .build(),
+                    Paths.get("Manager.zip"));
+            s3.putObject(PutObjectRequest.builder()
+                            .bucket("kfirorel")
+                            .key("Worker.zip").acl(ObjectCannedACL.PUBLIC_READ)
+                            .build(),
+                    Paths.get("Worker.zip"));
+        }catch (S3Exception e){ }
+    }
+   */
 
-    public static void printWithColor (String string){
+
+    private static void printWithColor (String string){
         final String ANSI_CYAN = "\u001B[36m";
         final String ANSI_BLACK = "\u001B[30m";
         final String ANSI_RESET = "\u001B[0m";
         final String ANSI_CYAN_BACKGROUND = "\u001B[46m";
         final String ANSI_WHITE_BACKGROUND = "\u001B[47m";
         System.out.println(ANSI_CYAN_BACKGROUND +ANSI_BLACK + string + ANSI_RESET);
+        logger.info(string);
+
     }
+
+    public static void initLogger(String loggerName) throws IOException{
+        FileHandler fileHandler = new FileHandler(loggerName + ".txt");
+        fileHandler.setFormatter(new SimpleFormatter());
+        logger.setLevel(Level.ALL);
+        logger.addHandler(fileHandler);
+    }
+
 
 
 }

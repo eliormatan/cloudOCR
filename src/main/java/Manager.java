@@ -9,10 +9,16 @@ import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.*;
 
 import java.io.*;
+import java.lang.reflect.Array;
 import java.net.URL;
 import java.nio.file.Paths;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
+import java.util.logging.FileHandler;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+import java.util.logging.SimpleFormatter;
 
 public class Manager {
     private static S3Client s3;
@@ -29,7 +35,16 @@ public class Manager {
     private static final String done_task = "done task";
     private static List<String> workerIds;
 
-    public static void main (String args[]) {
+    private static Logger logger = Logger.getLogger(Manager.class.getName());
+
+
+    public static void main (String args[]){
+        try {
+            initLogger("ManagerLogger");
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
 
         //todo: maybe add threads?
 
@@ -44,13 +59,13 @@ public class Manager {
 
         //manager 2 local queue url = manager2LocalQUrl
         String manager2LocalQUrl = getQueueRequestAndGetUrl(manager2LocalQ);
-        LocalApp.printWithColor("get loca2manager and manager2local queues "+local2ManagerQUrl+" "+manager2LocalQUrl);
+        printWithColor("get loca2manager and manager2local queues "+local2ManagerQUrl+" "+manager2LocalQUrl);
 
         //create queues to send & receive messages from workers
         //createQueueRequestAndGetUrl function is taken from LocalApp
         String manager2WorkerQUrl = createQueueRequestAndGetUrl(manager2WorkerQ);
         String worker2ManagerQUrl = createQueueRequestAndGetUrl(worker2ManagerQ);
-        LocalApp.printWithColor("created manager2Worker and worker2Manager queues: "+manager2WorkerQUrl+" "+worker2ManagerQUrl);
+        printWithColor("created manager2Worker and worker2Manager queues: "+manager2WorkerQUrl+" "+worker2ManagerQUrl);
 
         String newTaskFileLink;
         String bucket;
@@ -68,16 +83,17 @@ public class Manager {
             List<Message> messages = sqs.receiveMessage(receiveRequest).messages();
             for (Message message : messages) {
                 String messageBody = message.body();
-                LocalApp.printWithColor("manager recieved message from local: "+messageBody);
+                printWithColor("manager recieved message from local: "+messageBody);
 
                 //split message and extract needed info
                 //message should be "new task$bucket$key$n$localID$terminate"
-                String[] splitMessage = messageBody.split("$");
+                String[] splitMessage = messageBody.split("\\$");
+                System.out.println(Arrays.toString(splitMessage));
                 bucket = splitMessage[1];
                 key = splitMessage[2];
-                linesPerWorker = Integer.parseInt(splitMessage[3]);
-                localId = splitMessage[4];
-                LocalApp.printWithColor("message split: "+bucket+" "+key+" "+linesPerWorker+" "+localId);
+                linesPerWorker = Integer.parseInt(splitMessage[4]);
+                localId = splitMessage[3];
+                printWithColor("message split: "+bucket+" "+key+" "+linesPerWorker+" "+localId);
                 if (splitMessage.length > 5 && splitMessage[5] == "terminate"){
                     terminate = true;
                 }
@@ -106,13 +122,13 @@ public class Manager {
                     System.out.println(e.getMessage());
                 }
 
-                LocalApp.printWithColor("file downloaded from s3");
+                printWithColor("file downloaded from s3");
 
                 //done with the input file, so we delete it from s3
                 DeleteObjectRequest deleteObjectRequest = DeleteObjectRequest.builder().bucket(bucket).key(key).build();
                 s3.deleteObject(deleteObjectRequest);
 
-                LocalApp.printWithColor("file deleted from s3");
+                printWithColor("file deleted from s3");
 
 
                 //STEP 5: Manager creates an SQS message for each URL in the list of images
@@ -124,7 +140,7 @@ public class Manager {
                     while (line != null){
                         numberOfLines++;
                         queueNewImageTask(manager2WorkerQUrl, line, localId);
-                        LocalApp.printWithColor("sent new image task to manager2Worker queue "+new_image_task + "$" + localId + "$" + line);
+                        printWithColor("sent new image task to manager2Worker queue "+new_image_task + "$" + localId + "$" + line);
 
                         //onto the next line
                         line = reader.readLine();
@@ -136,7 +152,7 @@ public class Manager {
                 } catch (IOException e) {
                     e.printStackTrace();
                 }
-                LocalApp.printWithColor("done sending...sent "+numberOfLines+" masseges (new tasks to workers)");
+                printWithColor("done sending...sent "+numberOfLines+" masseges (new tasks to workers)");
 
                 //delete the "new task" message from local2managerQUrl sqs queue
                 DeleteMessageRequest deleteRequest = DeleteMessageRequest.builder()
@@ -145,42 +161,47 @@ public class Manager {
                         .build();
                 sqs.deleteMessage(deleteRequest);
 
-                LocalApp.printWithColor("new task in "+local2ManagerQUrl+"queue deleted");
+                printWithColor("new task in "+local2ManagerQUrl+"queue deleted");
 
-                requiredWorkers = numberOfLines / linesPerWorker;
-                LocalApp.printWithColor("required workers = "+requiredWorkers+" =numberOfLines / linesPerWorker =" +numberOfLines+ "/ " + linesPerWorker);
+                requiredWorkers = (int) Math.ceil((double)numberOfLines / linesPerWorker);
+                printWithColor("required workers = "+requiredWorkers+" =numberOfLines / linesPerWorker =" +numberOfLines+ "/ " + linesPerWorker);
 
-                //STEP 6: Manager bootstraps nodes to process messages
-                //start workers and bootstrap them
-                startOrUpdateWorkers(requiredWorkers);
-                LocalApp.printWithColor("workers boosted");
+//                STEP 6: Manager bootstraps nodes to process messages
+//                start workers and bootstrap them
+                //todo:: uncomment
+                //startOrUpdateWorkers(requiredWorkers);
+                //printWithColor("workers boosted");
+//
+//
+//                STEP 11: Manager reads all the Workers' messages from SQS and creates one summary file
+//                STEP 12: Manager uploads summary file to S3
+//                STEP 13: Manager posts an SQS message about summary file
+                receiveDoneOcrTasks(numberOfLines, localId, bucket,worker2ManagerQUrl);
 
-
-                //STEP 11: Manager reads all the Workers' messages from SQS and creates one summary file
-                //STEP 12: Manager uploads summary file to S3
-                //STEP 13: Manager posts an SQS message about summary file
-                receiveDoneOcrTasks(numberOfLines, localId, bucket);
             }
         }
         //terminate workers
+
         TerminateInstancesRequest termRequest = TerminateInstancesRequest.builder().instanceIds(workerIds).build();
         TerminateInstancesResponse termResponse = ec2.terminateInstances(termRequest);
-        LocalApp.printWithColor("workers killed");
+        printWithColor("workers killed");
 
 
         //delete queues
         sqs.deleteQueue(DeleteQueueRequest.builder().queueUrl(worker2ManagerQUrl).build()); //worker2manager
         sqs.deleteQueue(DeleteQueueRequest.builder().queueUrl(manager2WorkerQUrl).build()); //manager2worker
-        LocalApp.printWithColor("worker2Manager and manager2Worker queues deleted");
+        printWithColor("worker2Manager and manager2Worker queues deleted");
 
         //terminate Manager
         DescribeInstancesRequest request = DescribeInstancesRequest.builder().filters(Filter.builder().name("tag:Manager").build()).build();
         DescribeInstancesResponse response = ec2.describeInstances(request);
         String managerId = response.reservations().get(0).instances().get(0).instanceId();
-        LocalApp.printWithColor("managerId(supposed to be not null): "+managerId);
+        printWithColor("managerId(supposed to be not null): "+managerId);
         TerminateInstancesRequest termManagerRequest = TerminateInstancesRequest.builder().instanceIds(managerId).build();
         TerminateInstancesResponse termManagerResponse = ec2.terminateInstances(termManagerRequest);
-        LocalApp.printWithColor("manager killed himself!");
+        printWithColor("manager killed himself!");
+
+
     }
 
     private static void startOrUpdateWorkers(int requiredWorkers) {
@@ -191,11 +212,11 @@ public class Manager {
         DescribeInstancesResponse response = ec2.describeInstances(request);
         //this is the number of workers, not sure if correct
         int currWorkers = (int) response.reservations().stream().count();
-        LocalApp.printWithColor("number of active workers: "+currWorkers+" and required workers: "+requiredWorkers);
+        printWithColor("number of active workers: "+currWorkers+" and required workers: "+requiredWorkers);
 
         if(currWorkers < 19 && currWorkers < requiredWorkers){
             int neededWorkers = requiredWorkers - currWorkers;
-            LocalApp.printWithColor("needed workers= "+neededWorkers+" =required-active = "+requiredWorkers+" - "+currWorkers);
+            printWithColor("needed workers= "+neededWorkers+" =required-active = "+requiredWorkers+" - "+currWorkers);
             ec2 = Ec2Client.create();
             Tag tag = Tag.builder()
                     .key("Worker")
@@ -216,7 +237,7 @@ public class Manager {
             RunInstancesResponse runResponse = ec2.runInstances(runRequest);
 
             List<Instance> instances = runResponse.instances();
-            LocalApp.printWithColor("added workes= "+Integer.toString(instances.size()-1));
+            printWithColor("added workes= "+Integer.toString(instances.size()-1));
 
             for (int i = 0; i < instances.size(); i++ ){
                 workerIds.add(instances.get(i).instanceId());
@@ -251,37 +272,38 @@ public class Manager {
 
     //receiveDoneOcrTasks
     //receive a finished OCR task from a worker
-    public static void receiveDoneOcrTasks(int lines, String localId, String bucket) {
+    public static void receiveDoneOcrTasks(int lines, String localId, String bucket, String qURL) {
         int lineCount = lines;
         String output = "output" + localId + ".html";
         while (lineCount != 0) {
             ReceiveMessageRequest receiveRequest = ReceiveMessageRequest.builder()
-                    .queueUrl(worker2ManagerQ)
+                    .queueUrl(qURL)
                     .build();
             List<Message> messages = sqs.receiveMessage(receiveRequest).messages();
             //read all done ocr tasks from worker2manager queue and append them all in output file
             for (Message m : messages) {
                 String body = m.body();
-                LocalApp.printWithColor("manager recieved message from worker: "+body);
+                printWithColor("manager recieved message from worker: "+body);
 
                 //message from worker should be done_ocr_task$localId$URL$OCR
-                String[] splitMessage = body.split("$",3);
+                String[] splitMessage = body.split("\\$",3);
                 String taskId = splitMessage[1];
                 String url = splitMessage[2];
                 String ocr = splitMessage[3];
-                LocalApp.printWithColor("message split: "+taskId+" "+url+" "+ocr);
-                LocalApp.printWithColor("taskID: "+taskId+"localID: "+localId);
+                //todo: check split why index out of bound splitMessage[3]?
+                printWithColor("message split: "+taskId+" "+url+" "+ocr);
+                printWithColor("taskID: "+taskId+"localID: "+localId);
 
                 if (taskId.equals(localId)) {
                     writeToOutput(output, url, ocr);
-                    LocalApp.printWithColor("add line to output");
+                    printWithColor("add line to output");
                     lineCount--;
                     DeleteMessageRequest deleteRequest = DeleteMessageRequest.builder()
-                            .queueUrl(worker2ManagerQ)
+                            .queueUrl(qURL)
                             .receiptHandle(m.receiptHandle())
                             .build();
                     sqs.deleteMessage(deleteRequest);
-                    LocalApp.printWithColor("message from worker2ManagerQ deleted");
+                    printWithColor("message from worker2ManagerQ deleted");
 
                 }
             }
@@ -290,15 +312,15 @@ public class Manager {
         s3.putObject(PutObjectRequest.builder().bucket(bucket).key(output).acl(ObjectCannedACL.PUBLIC_READ)
                         .build(),
                 RequestBody.fromFile(Paths.get(output)));
-        LocalApp.printWithColor("summary file uploded to s3 by manager");
+        printWithColor("summary file uploded to s3 by manager");
 
         SendMessageRequest messageRequest = SendMessageRequest.builder()
-                .queueUrl(manager2LocalQ)
+                .queueUrl(qURL)
                 .messageBody(done_task + "$" + localId)
                 .delaySeconds(5)
                 .build();
         sqs.sendMessage(messageRequest);
-        LocalApp.printWithColor("send message to manager2LocalQ: "+done_task + "$" + localId);
+        printWithColor("send message to manager2LocalQ: "+done_task + "$" + localId);
 
 
         //after output is uploaded to s3, delete it since we no longer need it
@@ -336,6 +358,23 @@ public class Manager {
         } catch (IOException e) {
             e.printStackTrace();
         }
+
+    }
+    public static void initLogger(String loggerName) throws IOException{
+        FileHandler fileHandler = new FileHandler(loggerName + ".txt");
+        fileHandler.setFormatter(new SimpleFormatter());
+        logger.setLevel(Level.ALL);
+        logger.addHandler(fileHandler);
+    }
+
+    private static void printWithColor (String string){
+        final String ANSI_CYAN = "\u001B[36m";
+        final String ANSI_BLACK = "\u001B[30m";
+        final String ANSI_RESET = "\u001B[0m";
+        final String ANSI_CYAN_BACKGROUND = "\u001B[46m";
+        final String ANSI_WHITE_BACKGROUND = "\u001B[47m";
+        System.out.println(ANSI_CYAN_BACKGROUND +ANSI_BLACK + string + ANSI_RESET);
+        logger.info(string);
 
     }
 }

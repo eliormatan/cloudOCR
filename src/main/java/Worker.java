@@ -14,16 +14,30 @@ import java.net.MalformedURLException;
 import java.net.URL;
 
 import java.util.List;
+import java.util.logging.FileHandler;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+import java.util.logging.SimpleFormatter;
 
 public class Worker {
 
     private static SqsClient sqs;
     private static final String manager2WorkerQ = "manager2WorkerQ";
     private static final String worker2ManagerQ = "worker2ManagerQ";
-    private static final String new_image_task = "new_image_task";
-    private static final String done_ocr_task = "done_ocr_task";
+    private static final String new_image_task = "new image task";
+    private static final String done_ocr_task = "done ocr task";
+
+    private static Logger logger = Logger.getLogger(Worker.class.getName());
+
 
     public static void main(String[] args) {
+
+
+        try {
+            initLogger("WorkerLogger");
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
 
         Region region = Region.US_EAST_1;
         sqs = SqsClient.builder().region(region).build();
@@ -32,34 +46,35 @@ public class Worker {
         String manager2WorkerQUrl = getQueueRequestAndGetUrl(manager2WorkerQ);
         //get w2m queue (created in manager)
         String worker2ManagerQUrl = getQueueRequestAndGetUrl(worker2ManagerQ);
-        LocalApp.printWithColor("get manager2Worker and worker2Manager queues "+manager2WorkerQUrl+" "+worker2ManagerQUrl);
+        printWithColor("get manager2Worker and worker2Manager queues "+manager2WorkerQUrl+" "+worker2ManagerQUrl);
 
+        //todo: change to while(true)
+        int count=0;
+        while(count!=24){
 
-        while(true){
             // Worker gets an image message from an SQS queue
             // receive messages from the queue
             List<Message> messages = receiveMessages(manager2WorkerQUrl);
             for (Message m : messages) {
-                LocalApp.printWithColor("worker recieved message from manager: "+m.body());
-                String[] bodyArr = m.body().split("$");
+                printWithColor("worker recieved message from manager: "+m.body());
+                String[] bodyArr = m.body().split("\\$");
                 String task=bodyArr[0];
                 String localId = bodyArr[1];
                 String imageUrl = bodyArr[2];
-                LocalApp.printWithColor("message split: "+task+" "+localId+" "+imageUrl);
 
                 //check for 'done task' message
                 if (task.equals(new_image_task)) {
                     //apply OCR and get result(image+text/error)
                     String result=applyOCR(imageUrl);
-                    LocalApp.printWithColor("ocr result: "+result);
+                    printWithColor("ocr result: "+result);
 
                     //send message to manager with the OCR result
                     sendMessage(worker2ManagerQUrl, done_ocr_task + "$" + localId + "$" + result);
-                    LocalApp.printWithColor("send message to manager2LocalQ: "+done_ocr_task + "$" + localId + "$" + result);
-
+                    printWithColor("send message to worker2ManagerQUrl: "+done_ocr_task + "$" + localId + "$" +result);
+                    count++;
                     //delete message
                     deleteMessage(manager2WorkerQUrl, m);
-                    LocalApp.printWithColor("message from manager2WorkerQ deleted:" + m);
+                    printWithColor("message from manager2WorkerQ deleted:" + m);
 
                 }
             }
@@ -85,7 +100,7 @@ public class Worker {
     private static List<Message> receiveMessages(String queueUrl) {
         ReceiveMessageRequest receiveRequest = ReceiveMessageRequest.builder()
                 .queueUrl(queueUrl)
-                .visibilityTimeout(45)
+//                .visibilityTimeout(45)
                 .build();
         return sqs.receiveMessage(receiveRequest).messages();
     }
@@ -141,4 +156,23 @@ public class Worker {
         }
         return output;
     }
+
+    private static void printWithColor (String string){
+        final String ANSI_CYAN = "\u001B[36m";
+        final String ANSI_BLACK = "\u001B[30m";
+        final String ANSI_RESET = "\u001B[0m";
+        final String ANSI_CYAN_BACKGROUND = "\u001B[46m";
+        final String ANSI_WHITE_BACKGROUND = "\u001B[47m";
+        System.out.println(ANSI_CYAN_BACKGROUND +ANSI_BLACK + string + ANSI_RESET);
+        logger.info(string);
+
+    }
+
+    public static void initLogger(String loggerName) throws IOException{
+        FileHandler fileHandler = new FileHandler(loggerName + ".txt");
+        fileHandler.setFormatter(new SimpleFormatter());
+        logger.setLevel(Level.ALL);
+        logger.addHandler(fileHandler);
+    }
+
 }
