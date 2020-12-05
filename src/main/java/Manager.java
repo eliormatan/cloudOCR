@@ -93,10 +93,11 @@ public class Manager {
                 key = splitMessage[2];
                 linesPerWorker = Integer.parseInt(splitMessage[4]);
                 localId = splitMessage[3];
-                printWithColor("message split: "+bucket+" "+key+" "+linesPerWorker+" "+localId);
-                if (splitMessage.length > 5 && splitMessage[5] == "terminate"){
+                if (splitMessage.length > 5 && splitMessage[5].equals("terminate")){
                     terminate = true;
+                    printWithColor("TERMINATE == TRUE");
                 }
+                printWithColor("message split: "+bucket+" "+key+" "+linesPerWorker+" "+localId+" "+"terminate = "+terminate);
 
                 //open/create input file and name it according to the localapp ID that sent it
                 try {
@@ -176,15 +177,15 @@ public class Manager {
 //                STEP 11: Manager reads all the Workers' messages from SQS and creates one summary file
 //                STEP 12: Manager uploads summary file to S3
 //                STEP 13: Manager posts an SQS message about summary file
-                receiveDoneOcrTasks(numberOfLines, localId, bucket,worker2ManagerQUrl);
+                receiveDoneOcrTasks(numberOfLines, localId, bucket,worker2ManagerQUrl, manager2LocalQUrl);
 
             }
         }
         //terminate workers
-
-        TerminateInstancesRequest termRequest = TerminateInstancesRequest.builder().instanceIds(workerIds).build();
-        TerminateInstancesResponse termResponse = ec2.terminateInstances(termRequest);
-        printWithColor("workers killed");
+        //todo:uncomment
+//        TerminateInstancesRequest termRequest = TerminateInstancesRequest.builder().instanceIds(workerIds).build();
+//        TerminateInstancesResponse termResponse = ec2.terminateInstances(termRequest);
+//        printWithColor("workers killed");
 
 
         //delete queues
@@ -193,14 +194,15 @@ public class Manager {
         printWithColor("worker2Manager and manager2Worker queues deleted");
 
         //terminate Manager
-        DescribeInstancesRequest request = DescribeInstancesRequest.builder().filters(Filter.builder().name("tag:Manager").build()).build();
-        DescribeInstancesResponse response = ec2.describeInstances(request);
-        String managerId = response.reservations().get(0).instances().get(0).instanceId();
-        printWithColor("managerId(supposed to be not null): "+managerId);
-        TerminateInstancesRequest termManagerRequest = TerminateInstancesRequest.builder().instanceIds(managerId).build();
-        TerminateInstancesResponse termManagerResponse = ec2.terminateInstances(termManagerRequest);
-        printWithColor("manager killed himself!");
-
+        //todo: uncomment
+//        DescribeInstancesRequest request = DescribeInstancesRequest.builder().filters(Filter.builder().name("tag:Manager").build()).build();
+//        DescribeInstancesResponse response = ec2.describeInstances(request);
+//        String managerId = response.reservations().get(0).instances().get(0).instanceId();
+//        printWithColor("managerId(supposed to be not null): "+managerId);
+//        TerminateInstancesRequest termManagerRequest = TerminateInstancesRequest.builder().instanceIds(managerId).build();
+//        TerminateInstancesResponse termManagerResponse = ec2.terminateInstances(termManagerRequest);
+//        printWithColor("manager killed himself!");
+        printWithColor("finished elegantly!");
 
     }
 
@@ -271,13 +273,13 @@ public class Manager {
     }
 
     //receiveDoneOcrTasks
-    //receive a finished OCR task from a worker
-    public static void receiveDoneOcrTasks(int lines, String localId, String bucket, String qURL) {
+    //receive all finished OCR tasks from workers, create summary file, and upload to s3 for LocalApp
+    public static void receiveDoneOcrTasks(int lines, String localId, String bucket, String worker2ManagerQUrl, String manager2LocalQUrl) {
         int lineCount = lines;
         String output = "output" + localId + ".html";
         while (lineCount != 0) {
             ReceiveMessageRequest receiveRequest = ReceiveMessageRequest.builder()
-                    .queueUrl(qURL)
+                    .queueUrl(worker2ManagerQUrl)
                     .build();
             List<Message> messages = sqs.receiveMessage(receiveRequest).messages();
             //read all done ocr tasks from worker2manager queue and append them all in output file
@@ -286,20 +288,19 @@ public class Manager {
                 printWithColor("manager recieved message from worker: "+body);
 
                 //message from worker should be done_ocr_task$localId$URL$OCR
-                String[] splitMessage = body.split("\\$",3);
+                String[] splitMessage = body.split("\\$",4);
                 String taskId = splitMessage[1];
                 String url = splitMessage[2];
                 String ocr = splitMessage[3];
-                //todo: check split why index out of bound splitMessage[3]?
                 printWithColor("message split: "+taskId+" "+url+" "+ocr);
                 printWithColor("taskID: "+taskId+"localID: "+localId);
 
                 if (taskId.equals(localId)) {
-                    writeToOutput(output, url, ocr);
                     printWithColor("add line to output");
+                    writeToOutput(output, url, ocr);
                     lineCount--;
                     DeleteMessageRequest deleteRequest = DeleteMessageRequest.builder()
-                            .queueUrl(qURL)
+                            .queueUrl(worker2ManagerQUrl)
                             .receiptHandle(m.receiptHandle())
                             .build();
                     sqs.deleteMessage(deleteRequest);
@@ -312,10 +313,10 @@ public class Manager {
         s3.putObject(PutObjectRequest.builder().bucket(bucket).key(output).acl(ObjectCannedACL.PUBLIC_READ)
                         .build(),
                 RequestBody.fromFile(Paths.get(output)));
-        printWithColor("summary file uploded to s3 by manager");
+        printWithColor("summary file uploaded to s3 by manager");
 
         SendMessageRequest messageRequest = SendMessageRequest.builder()
-                .queueUrl(qURL)
+                .queueUrl(manager2LocalQUrl)
                 .messageBody(done_task + "$" + localId)
                 .delaySeconds(5)
                 .build();
@@ -353,8 +354,9 @@ public class Manager {
     private static void writeToOutput(String output, String url, String ocr){
         try {
             FileWriter writer = new FileWriter(output,true);
-            writer.write("<img src=" + url + ">");
-            writer.write(ocr);
+            writer.write("<p><img src=" + url + "></p>");
+            writer.write(ocr+"<br>");
+            writer.close();
         } catch (IOException e) {
             e.printStackTrace();
         }

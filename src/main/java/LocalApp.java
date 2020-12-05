@@ -11,6 +11,7 @@ import software.amazon.awssdk.services.sqs.model.*;
 
 import java.io.IOException;
 import java.nio.file.Paths;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
 import java.util.logging.FileHandler;
@@ -55,8 +56,9 @@ public class LocalApp {
                         "java -jar yourjar.jar inputFileName outputFileName n terminate(optional)";
         String outputS3Path = null;
         boolean done = false;
-        boolean terminate = args.length > 4 && args[4].equals("terminate");
-
+        printWithColor("program args are: "+ Arrays.toString(args));
+        boolean terminate = args.length > 3 && args[3].equals("terminate");
+        printWithColor("TERMINATE = " + terminate);
         if (args.length < 3)
             throw new IllegalArgumentException(arguments);
 
@@ -77,9 +79,16 @@ public class LocalApp {
                     Paths.get(input));
             printWithColor("uploaded file to s3 https://" + bucket + ".s3.amazonaws.com/" + key);
 
-            //send the location of the file in s3 to the queue (using $ as a delimiter)
-            sendMessage(l2m_qUrl, new_task + "$" + bucket + "$" + key + "$" + localId + "$" + filesRatio);
-            printWithColor("sent new task to local2manager queue "+new_task + "$" + bucket + "$" + key + "$" + localId + "$" + filesRatio);
+            //send the location of the file in s3 to the queue (using $ as a delimiter) with terminate if provided
+            if(terminate){
+                sendMessage(l2m_qUrl, new_task + "$" + bucket + "$" + key + "$" + localId + "$" + filesRatio + "$" + "terminate");
+                printWithColor("sent new task to local2manager queue "+new_task + "$" + bucket + "$" + key + "$" + localId + "$" + filesRatio+ " with TERMINATE");
+
+            }
+            else{
+                sendMessage(l2m_qUrl, new_task + "$" + bucket + "$" + key + "$" + localId + "$" + filesRatio);
+                printWithColor("sent new task to local2manager queue "+new_task + "$" + bucket + "$" + key + "$" + localId + "$" + filesRatio);
+            }
 
             //check if a 'Manager' node is active on the EC2 cloud. If it is not, the application will start the manager node.
 //            startManager();
@@ -91,6 +100,7 @@ public class LocalApp {
                     String[] bodyArr = m.body().split("\\$");
                     //check for 'done task' message
                     if (bodyArr[0].equals(done_task)) {
+                        printWithColor("received done task!");
                         //delete message
                         deleteMessage(m2l_qUrl, m);
                         //get s3 location of the output file
@@ -106,17 +116,18 @@ public class LocalApp {
             }
 
             // download summary file from S3 and write it to output file
-            s3.getObject(GetObjectRequest.builder().bucket(bucket).key(outputS3Path).build(),
+            printWithColor("downloading summary from : bucket = "+bucket+" key = output"+outputS3Path);
+            s3.getObject(GetObjectRequest.builder().bucket(bucket).key("output"+outputS3Path+".html").build(),
                     ResponseTransformer.toFile(Paths.get(output)));
 
-            if (terminate)
-                sendMessage(l2m_qUrl, "terminate");
+//            if (terminate)
+//                sendMessage(l2m_qUrl, "terminate");
 
 
             //delete sqs queues
             deleteSQSQueue(local2ManagerQ);
             deleteSQSQueue(manager2LocalQ);
-            printWithColor("loca2manager and manager2local queues deleted");
+            printWithColor("local2manager and manager2local queues deleted");
             //delete s3 bucket
             deleteBucket(bucket);
             printWithColor("deleted bucket "+bucket);
@@ -127,6 +138,7 @@ public class LocalApp {
             e.printStackTrace();
             System.exit(1);
         }
+        printWithColor("finished elegantly!");
     }
 
 
