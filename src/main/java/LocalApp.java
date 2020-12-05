@@ -120,7 +120,7 @@ public class LocalApp {
                 .bucket(bucket)
                 .createBucketConfiguration(
                         CreateBucketConfiguration.builder()
-
+                //                .locationConstraint(region.id())
                                 .build())
                 .build());
     }
@@ -294,9 +294,8 @@ public class LocalApp {
                     "sudo apt-get install maven\n"+
                     "mvn -version" +
                     "echo download jar file\r\n" +
-                    //todo:download tessarct jar
-                    //todo: download worker+manager+readocr jars
-                    // use wget to download jars (https://linuxize.com/post/wget-command-examples/)
+                    //todo: download worker+manager+tessarct jars
+                    //use wget to download jars (https://linuxize.com/post/wget-command-examples/)
                     //"wget ..."
                     //example: wget http://www.cs.bgu.ac.il/~dsp211/Main -O dsp.html
                     // will download the content at http://www.cs.bgu.ac.il/~dsp211/Main and save it to a file named dsp.html
@@ -314,10 +313,12 @@ public class LocalApp {
     }
 
     public static void printWithColor (String string){
+        final String ANSI_CYAN = "\u001B[36m";
         final String ANSI_BLACK = "\u001B[30m";
         final String ANSI_RESET = "\u001B[0m";
+        final String ANSI_CYAN_BACKGROUND = "\u001B[46m";
         final String ANSI_WHITE_BACKGROUND = "\u001B[47m";
-        System.out.println(ANSI_WHITE_BACKGROUND +ANSI_BLACK + string + ANSI_RESET);
+        System.out.println(ANSI_CYAN_BACKGROUND +ANSI_BLACK + string + ANSI_RESET);
     }
 
 

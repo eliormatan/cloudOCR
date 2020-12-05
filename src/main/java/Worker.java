@@ -2,6 +2,17 @@ import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.*;
 
+import net.sourceforge.tess4j.Tesseract;
+import net.sourceforge.tess4j.TesseractException;
+import net.sourceforge.tess4j.util.LoadLibs;
+
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.File;
+import java.io.IOException;
+import java.net.MalformedURLException;
+import java.net.URL;
+
 import java.util.List;
 
 public class Worker {
@@ -14,33 +25,42 @@ public class Worker {
 
     public static void main(String[] args) {
 
-        Region region = Region.US_WEST_2;
+        Region region = Region.US_EAST_1;
         sqs = SqsClient.builder().region(region).build();
 
         //get m2w queue (created in manager)
         String manager2WorkerQUrl = getQueueRequestAndGetUrl(manager2WorkerQ);
         //get w2m queue (created in manager)
         String worker2ManagerQUrl = getQueueRequestAndGetUrl(worker2ManagerQ);
+        LocalApp.printWithColor("get manager2Worker and worker2Manager queues "+manager2WorkerQUrl+" "+worker2ManagerQUrl);
+
 
         while(true){
             // Worker gets an image message from an SQS queue
             // receive messages from the queue
             List<Message> messages = receiveMessages(manager2WorkerQUrl);
             for (Message m : messages) {
+                LocalApp.printWithColor("worker recieved message from manager: "+m.body());
                 String[] bodyArr = m.body().split("$");
                 String task=bodyArr[0];
                 String localId = bodyArr[1];
                 String imageUrl = bodyArr[2];
+                LocalApp.printWithColor("message split: "+task+" "+localId+" "+imageUrl);
+
                 //check for 'done task' message
                 if (task.equals(new_image_task)) {
                     //apply OCR and get result(image+text/error)
-                    String result=ReadOCR.main(new String[]{imageUrl});
+                    String result=applyOCR(imageUrl);
+                    LocalApp.printWithColor("ocr result: "+result);
 
                     //send message to manager with the OCR result
                     sendMessage(worker2ManagerQUrl, done_ocr_task + "$" + localId + "$" + result);
+                    LocalApp.printWithColor("send message to manager2LocalQ: "+done_ocr_task + "$" + localId + "$" + result);
 
                     //delete message
                     deleteMessage(manager2WorkerQUrl, m);
+                    LocalApp.printWithColor("message from manager2WorkerQ deleted:" + m);
+
                 }
             }
         }
@@ -85,5 +105,40 @@ public class Worker {
                 .delaySeconds(5)
                 .build();
         sqs.sendMessage(send_msg_request);
+    }
+
+    private static String applyOCR(String image_url){
+        String output=image_url+"$";
+
+        //download image from URL
+
+        URL url = null;
+        try {
+            url = new URL(image_url);
+        } catch (MalformedURLException e) {
+            output+=e.getMessage();
+        }
+
+        BufferedImage img = null;
+        try {
+            img = ImageIO.read(url);
+        } catch (IOException e) {
+            output+=e.getMessage();
+        }
+
+        //TESSERACT PART
+        //create my OCR reader
+        Tesseract reader = new Tesseract();
+        File tessDataFolder = LoadLibs.extractTessResources("tessdata");
+        reader.setDatapath(tessDataFolder.getPath());
+        //perform OCR on image_to_read and write into HTML file result.html
+        try {
+            //perform OCR
+            String OCR_result = reader.doOCR(img);
+            output+=OCR_result;
+        } catch (TesseractException e) {
+            output+=e.getMessage();
+        }
+        return output;
     }
 }

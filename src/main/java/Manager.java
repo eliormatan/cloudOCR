@@ -33,7 +33,7 @@ public class Manager {
 
         //todo: maybe add threads?
 
-        Region region = Region.US_WEST_2;
+        Region region = Region.US_EAST_1;
         sqs = SqsClient.builder().region(region).build();
         s3 = S3Client.builder().region(region).build();
 
@@ -41,13 +41,16 @@ public class Manager {
         //queue access by name, i called it local2ManagerQ
         //local 2 manager queue url = local2ManagerQUrl
         String local2ManagerQUrl = getQueueRequestAndGetUrl(local2ManagerQ);
+
         //manager 2 local queue url = manager2LocalQUrl
         String manager2LocalQUrl = getQueueRequestAndGetUrl(manager2LocalQ);
+        LocalApp.printWithColor("get loca2manager and manager2local queues "+local2ManagerQUrl+" "+manager2LocalQUrl);
 
         //create queues to send & receive messages from workers
         //createQueueRequestAndGetUrl function is taken from LocalApp
         String manager2WorkerQUrl = createQueueRequestAndGetUrl(manager2WorkerQ);
         String worker2ManagerQUrl = createQueueRequestAndGetUrl(worker2ManagerQ);
+        LocalApp.printWithColor("created manager2Worker and worker2Manager queues: "+manager2WorkerQUrl+" "+worker2ManagerQUrl);
 
         String newTaskFileLink;
         String bucket;
@@ -65,6 +68,7 @@ public class Manager {
             List<Message> messages = sqs.receiveMessage(receiveRequest).messages();
             for (Message message : messages) {
                 String messageBody = message.body();
+                LocalApp.printWithColor("manager recieved message from local: "+messageBody);
 
                 //split message and extract needed info
                 //message should be "new task$bucket$key$n$localID$terminate"
@@ -73,6 +77,7 @@ public class Manager {
                 key = splitMessage[2];
                 linesPerWorker = Integer.parseInt(splitMessage[3]);
                 localId = splitMessage[4];
+                LocalApp.printWithColor("message split: "+bucket+" "+key+" "+linesPerWorker+" "+localId);
                 if (splitMessage.length > 5 && splitMessage[5] == "terminate"){
                     terminate = true;
                 }
@@ -100,9 +105,15 @@ public class Manager {
                 } catch (IOException e) {
                     System.out.println(e.getMessage());
                 }
+
+                LocalApp.printWithColor("file downloaded from s3");
+
                 //done with the input file, so we delete it from s3
                 DeleteObjectRequest deleteObjectRequest = DeleteObjectRequest.builder().bucket(bucket).key(key).build();
                 s3.deleteObject(deleteObjectRequest);
+
+                LocalApp.printWithColor("file deleted from s3");
+
 
                 //STEP 5: Manager creates an SQS message for each URL in the list of images
                 //read lines (image links) from input file and create new image tasks for workers out of each line
@@ -113,6 +124,8 @@ public class Manager {
                     while (line != null){
                         numberOfLines++;
                         queueNewImageTask(manager2WorkerQUrl, line, localId);
+                        LocalApp.printWithColor("sent new image task to manager2Worker queue "+new_image_task + "$" + localId + "$" + line);
+
                         //onto the next line
                         line = reader.readLine();
                     }
@@ -123,16 +136,25 @@ public class Manager {
                 } catch (IOException e) {
                     e.printStackTrace();
                 }
+                LocalApp.printWithColor("done sending...sent "+numberOfLines+" masseges (new tasks to workers)");
+
                 //delete the "new task" message from local2managerQUrl sqs queue
                 DeleteMessageRequest deleteRequest = DeleteMessageRequest.builder()
                         .queueUrl(local2ManagerQUrl)
                         .receiptHandle(message.receiptHandle())
                         .build();
                 sqs.deleteMessage(deleteRequest);
+
+                LocalApp.printWithColor("new task in "+local2ManagerQUrl+"queue deleted");
+
                 requiredWorkers = numberOfLines / linesPerWorker;
+                LocalApp.printWithColor("required workers = "+requiredWorkers+" =numberOfLines / linesPerWorker =" +numberOfLines+ "/ " + linesPerWorker);
+
                 //STEP 6: Manager bootstraps nodes to process messages
                 //start workers and bootstrap them
                 startOrUpdateWorkers(requiredWorkers);
+                LocalApp.printWithColor("workers boosted");
+
 
                 //STEP 11: Manager reads all the Workers' messages from SQS and creates one summary file
                 //STEP 12: Manager uploads summary file to S3
@@ -143,17 +165,22 @@ public class Manager {
         //terminate workers
         TerminateInstancesRequest termRequest = TerminateInstancesRequest.builder().instanceIds(workerIds).build();
         TerminateInstancesResponse termResponse = ec2.terminateInstances(termRequest);
+        LocalApp.printWithColor("workers killed");
+
 
         //delete queues
         sqs.deleteQueue(DeleteQueueRequest.builder().queueUrl(worker2ManagerQUrl).build()); //worker2manager
         sqs.deleteQueue(DeleteQueueRequest.builder().queueUrl(manager2WorkerQUrl).build()); //manager2worker
+        LocalApp.printWithColor("worker2Manager and manager2Worker queues deleted");
 
         //terminate Manager
         DescribeInstancesRequest request = DescribeInstancesRequest.builder().filters(Filter.builder().name("tag:Manager").build()).build();
         DescribeInstancesResponse response = ec2.describeInstances(request);
         String managerId = response.reservations().get(0).instances().get(0).instanceId();
+        LocalApp.printWithColor("managerId(supposed to be not null): "+managerId);
         TerminateInstancesRequest termManagerRequest = TerminateInstancesRequest.builder().instanceIds(managerId).build();
         TerminateInstancesResponse termManagerResponse = ec2.terminateInstances(termManagerRequest);
+        LocalApp.printWithColor("manager killed himself!");
     }
 
     private static void startOrUpdateWorkers(int requiredWorkers) {
@@ -164,8 +191,11 @@ public class Manager {
         DescribeInstancesResponse response = ec2.describeInstances(request);
         //this is the number of workers, not sure if correct
         int currWorkers = (int) response.reservations().stream().count();
+        LocalApp.printWithColor("number of active workers: "+currWorkers+" and required workers: "+requiredWorkers);
+
         if(currWorkers < 19 && currWorkers < requiredWorkers){
             int neededWorkers = requiredWorkers - currWorkers;
+            LocalApp.printWithColor("needed workers= "+neededWorkers+" =required-active = "+requiredWorkers+" - "+currWorkers);
             ec2 = Ec2Client.create();
             Tag tag = Tag.builder()
                     .key("Worker")
@@ -184,7 +214,10 @@ public class Manager {
 
 
             RunInstancesResponse runResponse = ec2.runInstances(runRequest);
+
             List<Instance> instances = runResponse.instances();
+            LocalApp.printWithColor("added workes= "+Integer.toString(instances.size()-1));
+
             for (int i = 0; i < instances.size(); i++ ){
                 workerIds.add(instances.get(i).instanceId());
             }
@@ -199,6 +232,7 @@ public class Manager {
                 "sudo apt-get install maven\n"+
                 "mvn -version" +
                 "echo download jar file\r\n" +
+                //todo: upload jar
                 //we can upload jar files to s3 and download them using wget like so:
                 // wget "https://<bucket>.s3.amazonaws.com/<key>
                 "echo running Worker\r\n" +
@@ -228,19 +262,27 @@ public class Manager {
             //read all done ocr tasks from worker2manager queue and append them all in output file
             for (Message m : messages) {
                 String body = m.body();
+                LocalApp.printWithColor("manager recieved message from worker: "+body);
+
                 //message from worker should be done_ocr_task$localId$URL$OCR
                 String[] splitMessage = body.split("$",3);
                 String taskId = splitMessage[1];
                 String url = splitMessage[2];
                 String ocr = splitMessage[3];
+                LocalApp.printWithColor("message split: "+taskId+" "+url+" "+ocr);
+                LocalApp.printWithColor("taskID: "+taskId+"localID: "+localId);
+
                 if (taskId.equals(localId)) {
                     writeToOutput(output, url, ocr);
+                    LocalApp.printWithColor("add line to output");
                     lineCount--;
                     DeleteMessageRequest deleteRequest = DeleteMessageRequest.builder()
                             .queueUrl(worker2ManagerQ)
                             .receiptHandle(m.receiptHandle())
                             .build();
                     sqs.deleteMessage(deleteRequest);
+                    LocalApp.printWithColor("message from worker2ManagerQ deleted");
+
                 }
             }
         }
@@ -248,12 +290,17 @@ public class Manager {
         s3.putObject(PutObjectRequest.builder().bucket(bucket).key(output).acl(ObjectCannedACL.PUBLIC_READ)
                         .build(),
                 RequestBody.fromFile(Paths.get(output)));
+        LocalApp.printWithColor("summary file uploded to s3 by manager");
+
         SendMessageRequest messageRequest = SendMessageRequest.builder()
                 .queueUrl(manager2LocalQ)
                 .messageBody(done_task + "$" + localId)
                 .delaySeconds(5)
                 .build();
         sqs.sendMessage(messageRequest);
+        LocalApp.printWithColor("send message to manager2LocalQ: "+done_task + "$" + localId);
+
+
         //after output is uploaded to s3, delete it since we no longer need it
         File f = new File(output);
         f.delete();
