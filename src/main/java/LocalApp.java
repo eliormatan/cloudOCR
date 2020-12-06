@@ -27,10 +27,9 @@ public class LocalApp {
     private static int filesRatio;
     private static final String amiId = "ami-068dc7ca584573afe";
 
-
     private static Logger logger = Logger.getLogger(LocalApp.class.getName());
 
-
+        //commit
         public static void main(String[] args) {
             try {
                 initLogger("LocalAppLogger");
