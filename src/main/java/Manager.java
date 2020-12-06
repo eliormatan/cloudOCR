@@ -27,7 +27,7 @@ public class Manager {
     private static S3Client s3;
     private static SqsClient sqs;
     private static Ec2Client ec2;
-    private static final String amiId = "ami-076515f20540e6e0b";
+    private static final String amiId = "ami-068dc7ca584573afe";
     private static final String local2ManagerQ = "local2ManagerQ";
     private static final String manager2LocalQ = "manager2LocalQ";
     private static final String manager2WorkerQ = "manager2WorkerQ";
@@ -41,15 +41,13 @@ public class Manager {
     private static Logger logger = Logger.getLogger(Manager.class.getName());
 
 
-    public static void main (String args[]){
+    public static void main (String args[]) throws InterruptedException {
         try {
             initLogger("ManagerLogger");
         } catch (IOException e) {
             e.printStackTrace();
         }
 
-
-        //todo: maybe add threads?
         final ThreadPoolExecutor executor = (ThreadPoolExecutor) Executors.newFixedThreadPool(4);
 
         Region region = Region.US_EAST_1;
@@ -178,9 +176,8 @@ public class Manager {
 
 //                STEP 6: Manager bootstraps nodes to process messages
 //                start workers and bootstrap them
-                    //todo:: uncomment
-                    //startOrUpdateWorkers(requiredWorkers);
-                    //printWithColor("workers boosted");
+                    startOrUpdateWorkers(requiredWorkers);
+                    printWithColor("workers boosted");
 //
 //
 //                STEP 11: Manager reads all the Workers' messages from SQS and creates one summary file
@@ -208,38 +205,41 @@ public class Manager {
         }
 
         //terminate workers
-        //todo:uncomment
-//        TerminateInstancesRequest termRequest = TerminateInstancesRequest.builder().instanceIds(workerIds).build();
-//        TerminateInstancesResponse termResponse = ec2.terminateInstances(termRequest);
-//        printWithColor("workers killed");
+        TerminateInstancesRequest termRequest = TerminateInstancesRequest.builder().instanceIds(workerIds).build();
+        TerminateInstancesResponse termResponse = ec2.terminateInstances(termRequest);
+        printWithColor("workers killed");
 
 
         //delete queues
         //todo:we must wait for all localapps to download summary files first, by checking if their buckets exist
-//        if(allBucketsAreDeleted()){
-//            deleteSQSQueue(worker2ManagerQ);
-//            deleteSQSQueue(manager2WorkerQ);
-//            printWithColor("worker2Manager and manager2Worker queues deleted");
-//            deleteSQSQueue(local2ManagerQ);
-//            deleteSQSQueue(manager2LocalQ);
-//            printWithColor("local2manager and manager2local queues deleted");
-//        }
+        while(!allBucketsAreDeleted()){
+            try {
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+        deleteSQSQueue(worker2ManagerQ);
+        deleteSQSQueue(manager2WorkerQ);
+        printWithColor("worker2Manager and manager2Worker queues deleted");
+        deleteSQSQueue(local2ManagerQ);
+        deleteSQSQueue(manager2LocalQ);
+        printWithColor("local2manager and manager2local queues deleted");
 
         //terminate Manager
-        //todo: uncomment
-//        DescribeInstancesRequest request = DescribeInstancesRequest.builder().filters(Filter.builder().name("tag:Manager").build()).build();
-//        DescribeInstancesResponse response = ec2.describeInstances(request);
-//        String managerId = response.reservations().get(0).instances().get(0).instanceId();
-//        printWithColor("managerId(supposed to be not null): "+managerId);
-//        TerminateInstancesRequest termManagerRequest = TerminateInstancesRequest.builder().instanceIds(managerId).build();
-//        TerminateInstancesResponse termManagerResponse = ec2.terminateInstances(termManagerRequest);
-//        printWithColor("manager killed himself!");
+        DescribeInstancesRequest request = DescribeInstancesRequest.builder().filters(Filter.builder().name("tag:Manager").build()).build();
+        DescribeInstancesResponse response = ec2.describeInstances(request);
+        String managerId = response.reservations().get(0).instances().get(0).instanceId();
+        printWithColor("managerId(supposed to be not null): "+managerId);
+        TerminateInstancesRequest termManagerRequest = TerminateInstancesRequest.builder().instanceIds(managerId).build();
+        TerminateInstancesResponse termManagerResponse = ec2.terminateInstances(termManagerRequest);
+        printWithColor("manager killed himself!");
         printWithColor("finished elegantly!");
 
     }
 
     private static boolean allBucketsAreDeleted() {
-        return s3.listBuckets().buckets().isEmpty();
+        return s3.listBuckets().buckets().size()==1;
     }
 
     private static void startOrUpdateWorkers(int requiredWorkers) {

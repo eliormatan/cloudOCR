@@ -25,7 +25,7 @@ public class LocalApp {
     private static S3Client s3;
     private static SqsClient sqs;
     private static int filesRatio;
-    private static final String amiId = "ami-076515f20540e6e0b"; //includes java
+    private static final String amiId = "ami-068dc7ca584573afe";
 
 
     private static Logger logger = Logger.getLogger(LocalApp.class.getName());
@@ -37,8 +37,6 @@ public class LocalApp {
             } catch (IOException e) {
                 e.printStackTrace();
             }
-
-            //todo: how to use cardinals/keyName/my aws credits?
 
         final String input = args[0];
         final String output = args[1];
@@ -66,6 +64,8 @@ public class LocalApp {
         try {
             //define s3
             s3 = S3Client.builder().region(region).build();
+          //  uploadCode();
+
             createBucket(bucket, region);
             printWithColor("created bucket "+bucket);
             //define sqs
@@ -91,8 +91,7 @@ public class LocalApp {
             }
 
             //check if a 'Manager' node is active on the EC2 cloud. If it is not, the application will start the manager node.
-            //todo: uncomment
-//            startManager();
+            startManager();
 
             while (!done) {
                 // receive messages from the queue
@@ -119,16 +118,14 @@ public class LocalApp {
             // download summary file from S3 and write it to output file
             printWithColor("downloading summary from : bucket = "+bucket+" key = output"+outputS3Path);
             s3.getObject(GetObjectRequest.builder().bucket(bucket).key("output"+outputS3Path+".html").build(),
-                    ResponseTransformer.toFile(Paths.get(localId+output))); //todo: remove localId from output name, only temporary to test multiple local apps
+                    ResponseTransformer.toFile(Paths.get(localId+output)));
 
-//            if (terminate)
-//                sendMessage(l2m_qUrl, "terminate");
-
-            //todo: we should let manager delete queues (after he gets terminated) to not affect other local apps
+            //todo:we should let manager delete queues (after he gets terminated) to not affect other local apps
             //delete sqs queues
 //            deleteSQSQueue(local2ManagerQ);
 //            deleteSQSQueue(manager2LocalQ);
 //            printWithColor("local2manager and manager2local queues deleted");
+
             //delete s3 bucket
             deleteBucket(bucket);
             printWithColor("deleted bucket "+bucket);
@@ -332,26 +329,28 @@ public class LocalApp {
         return userData;
     }
 
-    //todo: upload code
-  /*  private static void uploadCode(){
+    // use only once
+    private static void uploadCode(){
         try {
             s3.createBucket(CreateBucketRequest
-                    .builder().bucket("kfirorel")
-                    .createBucketConfiguration(CreateBucketConfiguration.builder()
-                            .locationConstraint(region.id()).build()).build());
+                    .builder().bucket("dsp211-ass1-jars")
+                    .createBucketConfiguration(CreateBucketConfiguration.builder().build()).build());
+                            //.locationConstraint(region.id()).build()).build());
             s3.putObject(PutObjectRequest.builder()
-                            .bucket("kfirorel")
-                            .key("Manager.zip").acl(ObjectCannedACL.PUBLIC_READ)
+                            .bucket("dsp211-ass1-jars")
+                            .key("Manager.jar").acl(ObjectCannedACL.PUBLIC_READ)
                             .build(),
-                    Paths.get("Manager.zip"));
+                    Paths.get("Manager.jar"));
             s3.putObject(PutObjectRequest.builder()
-                            .bucket("kfirorel")
-                            .key("Worker.zip").acl(ObjectCannedACL.PUBLIC_READ)
+                            .bucket("dsp211-ass1-jars")
+                            .key("Worker.jar").acl(ObjectCannedACL.PUBLIC_READ)
                             .build(),
-                    Paths.get("Worker.zip"));
-        }catch (S3Exception e){ }
+                    Paths.get("Worker.jar"));
+        }catch (S3Exception e){
+            e.printStackTrace();
+        }
     }
-   */
+
 
 
     private static void printWithColor (String string){
