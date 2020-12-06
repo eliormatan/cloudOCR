@@ -91,6 +91,7 @@ public class LocalApp {
             }
 
             //check if a 'Manager' node is active on the EC2 cloud. If it is not, the application will start the manager node.
+            //todo: uncomment
 //            startManager();
 
             while (!done) {
@@ -99,7 +100,7 @@ public class LocalApp {
                 for (Message m : messages) {
                     String[] bodyArr = m.body().split("\\$");
                     //check for 'done task' message
-                    if (bodyArr[0].equals(done_task)) {
+                    if (bodyArr[0].equals(done_task) && bodyArr[1].equals(localId)) {
                         printWithColor("received done task!");
                         //delete message
                         deleteMessage(m2l_qUrl, m);
@@ -118,16 +119,16 @@ public class LocalApp {
             // download summary file from S3 and write it to output file
             printWithColor("downloading summary from : bucket = "+bucket+" key = output"+outputS3Path);
             s3.getObject(GetObjectRequest.builder().bucket(bucket).key("output"+outputS3Path+".html").build(),
-                    ResponseTransformer.toFile(Paths.get(output)));
+                    ResponseTransformer.toFile(Paths.get(localId+output))); //todo: remove localId from output name, only temporary to test multiple local apps
 
 //            if (terminate)
 //                sendMessage(l2m_qUrl, "terminate");
 
-
+            //todo: we should let manager delete queues (after he gets terminated) to not affect other local apps
             //delete sqs queues
-            deleteSQSQueue(local2ManagerQ);
-            deleteSQSQueue(manager2LocalQ);
-            printWithColor("local2manager and manager2local queues deleted");
+//            deleteSQSQueue(local2ManagerQ);
+//            deleteSQSQueue(manager2LocalQ);
+//            printWithColor("local2manager and manager2local queues deleted");
             //delete s3 bucket
             deleteBucket(bucket);
             printWithColor("deleted bucket "+bucket);
@@ -315,25 +316,22 @@ public class LocalApp {
     }
 
     private static String getUserDataScript() {
-            String userData =
-                    //run the file with bash
-                    "#!/bin/bash\n"+
-                    "echo download jar file\r\n" +
-                    //todo: download worker+manager+tessarct jars
-                    //use wget to download jars (https://linuxize.com/post/wget-command-examples/)
-                    //"wget ..."
-                    //example: wget http://www.cs.bgu.ac.il/~dsp211/Main -O dsp.html
-                    // will download the content at http://www.cs.bgu.ac.il/~dsp211/Main and save it to a file named dsp.html
-                    // run Manager
-                    "echo running Manager\r\n" +
-                    "java -jar Manager.jar";
+        final String bucket="dsp211-ass1-jars";
+        final String key="Manager.jar";
 
-            /* basic commands
-            //https://dev.to/awwsmm/101-bash-commands-and-tips-for-beginners-to-experts-30je
-             */
+        String userData =
+                //run the file with bash
+                "#!/bin/bash\n"+
+                        //download Manager jar
+                        "echo download "+key+ "\r\n" +
+                        "wget https://" + bucket + ".s3.amazonaws.com/" + key +" -O " +key+ "\n" +
+                        // run Manager
+                        "echo running "+key+"\r\n" +
+                        "java -jar "+key+"\n";
 
         return userData;
     }
+
     //todo: upload code
   /*  private static void uploadCode(){
         try {
