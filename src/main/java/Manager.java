@@ -51,6 +51,7 @@ public class Manager {
         final ThreadPoolExecutor executor = (ThreadPoolExecutor) Executors.newFixedThreadPool(4);
 
         Region region = Region.US_EAST_1;
+        ec2 = Ec2Client.builder().region(region).build();
         sqs = SqsClient.builder().region(region).build();
         s3 = S3Client.builder().region(region).build();
 
@@ -267,7 +268,9 @@ public class Manager {
                     .imageId(amiId)
                     .maxCount(neededWorkers)
                     .minCount(1)
-                    .userData(Base64.getEncoder().encodeToString(getWorkerDataScript().getBytes()))
+                    .keyName("ass1")
+                    .iamInstanceProfile(IamInstanceProfileSpecification.builder().arn("arn:aws:iam::794818403225:instance-profile/ami-dsp211-ass1").build())
+                    //.userData(Base64.getEncoder().encodeToString(getWorkerDataScript().getBytes()))
                     .tagSpecifications(tags)
                     .build();
 

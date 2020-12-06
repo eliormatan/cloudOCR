@@ -1,3 +1,4 @@
+import software.amazon.awssdk.auth.credentials.InstanceProfileCredentialsProvider;
 import software.amazon.awssdk.core.sync.ResponseTransformer;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.ec2.Ec2Client;
@@ -61,10 +62,12 @@ public class LocalApp {
 
 
         try {
+            //define ec2
+            ec2 = Ec2Client.builder().region(region).build();
+
             //define s3
             s3 = S3Client.builder().region(region).build();
-          //  uploadCode();
-
+            //uploadCode();
             createBucket(bucket, region);
             printWithColor("created bucket "+bucket);
             //define sqs
@@ -196,14 +199,14 @@ public class LocalApp {
         if (managerIsActive())
             System.out.println("manager is already active...");
         else {
-            ec2 = Ec2Client.create();
-
             RunInstancesRequest runRequest = RunInstancesRequest.builder()
                     .instanceType(InstanceType.T2_MICRO)
                     .imageId(amiId)
                     .maxCount(1)
                     .minCount(1)
-                    .userData(Base64.getEncoder().encodeToString(getUserDataScript().getBytes()))
+                    .keyName("ass1")
+                    .iamInstanceProfile(IamInstanceProfileSpecification.builder().arn("arn:aws:iam::794818403225:instance-profile/ami-dsp211-ass1").build())
+                    // .userData(Base64.getEncoder().encodeToString(getUserDataScript().getBytes()))
                     .build();
 
             RunInstancesResponse response = ec2.runInstances(runRequest);
@@ -315,7 +318,7 @@ public class LocalApp {
         final String bucket="dsp211-ass1-jars";
         final String key="Manager.jar";
 
-        String userData =
+                String userData =
                 //run the file with bash
                 "#!/bin/bash\n"+
                         //download Manager jar
