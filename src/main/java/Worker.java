@@ -48,9 +48,7 @@ public class Worker {
         String worker2ManagerQUrl = getQueueRequestAndGetUrl(worker2ManagerQ);
         printWithColor("get manager2Worker and worker2Manager queues "+manager2WorkerQUrl+" "+worker2ManagerQUrl);
 
-        //todo: change to while(true)
-        int count=0;
-        while(count!=24){
+        while(true){
 
             // Worker gets an image message from an SQS queue
             // receive messages from the queue
@@ -71,7 +69,6 @@ public class Worker {
                     //send message to manager with the OCR result
                     sendMessage(worker2ManagerQUrl, done_ocr_task + "$" + localId + "$" + result);
                     printWithColor("send message to worker2ManagerQUrl: "+done_ocr_task + "$" + localId + "$" +result);
-                    count++;
                     //delete message
                     deleteMessage(manager2WorkerQUrl, m);
                     printWithColor("message from manager2WorkerQ deleted:" + m);
