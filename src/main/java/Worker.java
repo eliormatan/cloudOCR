@@ -76,14 +76,6 @@ public class Worker {
                 }
             }
         }
-
-        /*      IMPORTANT:
-        If an exception occurs, then the worker should recover from it, send a message to the manager of the input message that caused the exception together with a short description of the exception, and continue working on the next message.
-        If a worker stops working unexpectedly before finishing its work on a message, then some other worker should be able to handle that message.
-        */
-
-
-
     }
 
     private static String getQueueRequestAndGetUrl(String queue) {
@@ -141,14 +133,9 @@ public class Worker {
         //TESSERACT PART
         //create my OCR reader
         Tesseract reader = new Tesseract();
-//        File tessDataFolder = LoadLibs.extractTessResources("tessdata");
 
-//        printWithColor(tessDataFolder.getPath()+" getpath");
-//        printWithColor(tessDataFolder.getParent()+" getparent");
-//        printWithColor(tessDataFolder.getAbsolutePath()+ "getAbsolute");
 
         reader.setDatapath("/usr/share/tesseract");
-//        reader.setDatapath(tessDataFolder.getPath());
         //perform OCR on image_to_read and write into HTML file result.html
         try {
             //perform OCR

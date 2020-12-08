@@ -37,7 +37,7 @@ public class Manager {
     private static final String done_ocr_task = "done ocr task";
     private static final String new_task = "new task";
     private static final String done_task = "done task";
-    private static List<String> workerIds;
+    private static List<String> workerIds, bucketIds, manager2localqueues;
 
     private static Logger logger = Logger.getLogger(Manager.class.getName());
 
@@ -51,6 +51,8 @@ public class Manager {
 
         final ThreadPoolExecutor executor = (ThreadPoolExecutor) Executors.newFixedThreadPool(4);
         workerIds=new LinkedList<>();
+        bucketIds=new LinkedList<>();
+        manager2localqueues=new LinkedList<>();
         Region region = Region.US_EAST_1;
         ec2 = Ec2Client.builder().region(region).build();
         sqs = SqsClient.builder().region(region).build();
@@ -60,10 +62,7 @@ public class Manager {
         //queue access by name, i called it local2ManagerQ
         //local 2 manager queue url = local2ManagerQUrl
         String local2ManagerQUrl = getQueueRequestAndGetUrl(local2ManagerQ);
-
-        //manager 2 local queue url = manager2LocalQUrl
-        String manager2LocalQUrl = getQueueRequestAndGetUrl(manager2LocalQ);
-        printWithColor("get loca2manager and manager2local queues "+local2ManagerQUrl+" "+manager2LocalQUrl);
+        printWithColor("get local2manager"+local2ManagerQUrl);
 
         //create queues to send & receive messages from workers
         //createQueueRequestAndGetUrl function is taken from LocalApp
@@ -100,7 +99,13 @@ public class Manager {
                     terminate = true;
                     printWithColor("TERMINATE == TRUE");
                 }
+                bucketIds.add(bucket);
                 Runnable newMessage = () -> {
+                    //manager 2 local queue url = manager2LocalQUrl
+                    String manager2LocalQUrl = getQueueRequestAndGetUrl(manager2LocalQ + localId);
+                    manager2localqueues.add(manager2LocalQ + localId);
+                    printWithColor("get manager2local "+manager2LocalQUrl);
+
                     printWithColor("thread = "+ Thread.currentThread().getId() + " taking care of new task " + localId);
                     String newTaskFileLink;
                     int requiredWorkers;
@@ -210,10 +215,9 @@ public class Manager {
         }
 
         //terminate workers
-        //todo:uncom
-//        TerminateInstancesRequest termRequest = TerminateInstancesRequest.builder().instanceIds(workerIds).build();
-//        TerminateInstancesResponse termResponse = ec2.terminateInstances(termRequest);
-//        printWithColor("workers killed");
+        TerminateInstancesRequest termRequest = TerminateInstancesRequest.builder().instanceIds(workerIds).build();
+        TerminateInstancesResponse termResponse = ec2.terminateInstances(termRequest);
+        printWithColor("workers killed");
 
 
         //delete queues
@@ -228,24 +232,25 @@ public class Manager {
         deleteSQSQueue(manager2WorkerQ);
         printWithColor("worker2Manager and manager2Worker queues deleted");
         deleteSQSQueue(local2ManagerQ);
-        deleteSQSQueue(manager2LocalQ);
+        //delete all unique manager2local queues
+        for(String queue : manager2localqueues){
+            deleteSQSQueue(queue);
+        }
         printWithColor("local2manager and manager2local queues deleted");
 
-        //terminate Manager
-
-        DescribeInstancesRequest request = DescribeInstancesRequest.builder().filters(Filter.builder().name("tag:Manager").values("Manager").build()).build();
-        DescribeInstancesResponse response = ec2.describeInstances(request);
-        String managerId = response.reservations().get(0).instances().get(0).instanceId();
-        printWithColor("managerId(supposed to be not null): "+managerId);
-        TerminateInstancesRequest termManagerRequest = TerminateInstancesRequest.builder().instanceIds(managerId).build();
-        TerminateInstancesResponse termManagerResponse = ec2.terminateInstances(termManagerRequest);
-        printWithColor("manager killed himself!");
-        printWithColor("finished elegantly!");
+        //terminate Manager using shutdown command
 
     }
 
-    private static boolean allBucketsAreDeleted() {
-        return s3.listBuckets().buckets().size()==1;
+    public static boolean allBucketsAreDeleted() {
+        printWithColor("bucket list size "+ s3.listBuckets().buckets().size());
+        List<Bucket> buckets = s3.listBuckets().buckets();
+        for ( Bucket b : buckets){
+            if(bucketIds.contains(b.name())){
+                return false;
+            }
+        }
+        return true;
     }
 
     private static void startOrUpdateWorkers(int requiredWorkers) throws Exception {
@@ -275,24 +280,14 @@ public class Manager {
             RunInstancesRequest runRequest = RunInstancesRequest.builder()
                     .instanceType(InstanceType.T2_MICRO)
                     .imageId(amiId)
-                    .maxCount(1)
+                    .maxCount(neededWorkers)
                     .minCount(1)
-                    .keyName("ass1")
-                    .iamInstanceProfile(IamInstanceProfileSpecification.builder().arn("arn:aws:iam::794818403225:instance-profile/ami-dsp211-ass1").build())
-                    .securityGroupIds("sg-0630dc054e0184c80")
+                    .keyName("dspass1")
+                    .iamInstanceProfile(IamInstanceProfileSpecification.builder().arn("arn:aws:iam::320131450129:instance-profile/dspass1").build())
+                    .securityGroupIds("sg-0eead8b108fc9f860")
                     .userData(Base64.getEncoder().encodeToString(getWorkerDataScript().getBytes()))
                     .tagSpecifications(tags)
                     .build();
-
-            //todo: get permissions to runInstance..
-            // why does it works in localapp but here not?!
-            /*
-<13>Dec  6 22:56:31 user-data: 22:56:22.431 [pool-1-thread-1] DEBUG org.apache.http.wire - http-outgoing-2 >> "Action=RunInstances&Version=2016-11-15&ImageId=ami-068dc7ca584573afe&InstanceType=t2.micro&KeyName=ass1&MaxCount=3&MinCount=1&UserData=IyEvYmluL2Jhc2gKZXhlYyA%2BID4odGVlIC92YXIvbG9nL3VzZXItZGF0YS5sb2d8bG9nZ2VyIC10IHVzZXItZGF0YSAtcyAyPi9kZXYvY29uc29sZSkgMj4mMQplY2hvIGRvd25sb2FkIFdvcmtlci5qYXINCndnZXQgaHR0cHM6Ly9kc3AyMTEtYXNzMS1qYXJzLnMzLmFtYXpvbmF3cy5jb20vV29ya2VyLmphciAtTyBXb3JrZXIuamFyCmVjaG8gcnVubmluZyBXb3JrZXIuamFyDQpqYXZhIC1qYXIgV29ya2VyLmphcgo%3D&IamInstanceProfile.Arn=arn%3Aaws%3Aiam%3A%3A794818403225%3Ainstance-profile%2Fami-dsp211-ass1&TagSpecification.1.ResourceType=instance&TagSpecification.1.Tag.1.Key=Worker&TagSpecification.1.Tag.1.Value=Worker"
-<13>Dec  6 22:56:31 user-data: 22:56:22.863 [pool-1-thread-1] DEBUG org.apache.http.wire - http-outgoing-2 << "HTTP/1.1 403 Forbidden[\r][\n]"
-<13>Dec  6 22:56:31 user-data: 22:56:22.889 [pool-1-thread-1] DEBUG software.amazon.awssdk.request - Received error response: software.amazon.awssdk.services.ec2.model.Ec2Exception:
-You are not authorized to perform this operation. Encoded authorization failure message: 0MMOXH_XJnmgp2JSBpTKaKKdRqTJPDBS814CvNUpEBm_Z8sndys3ljrowrNZxIYTvkk1yHQslf5K_4dQzRwiNb4oLaDmvNFwwPEJaQtG4l7tieKAjR6GllOPnv_uOeqnBcooCkYYf1tk8h8IYU5FSO1cdbU6jz8IpEwZ8EvaaWHO9zFifhROLyFc1g9iJu-h4ojO1977wC7r4L85dn4MLDINDSufWNfud38cfr_qJ4KmS-gh9zyVYA3YKBrAYR2_gUmKzIODNWf61DBk27YsAuZe6mqjHs0JpDX9erF1oH0O0wq41TQhKz2ujnqSb2Vd1SljnMCFYP1igRnp-aMq14r4kKMYGrHcuvjamKW08lvKm6pHQwBsFC0-MSw-kiVRnAvQppJG5blwfyVjA1Yt7b7nqDo2KZ9CnAdXL4MwspE41cN0_SsxrQpdDw2h6lpWWd2fNZEiKVUCjDL2Oh2rGSGH64X9l4_epQkRipvCIVNFScup7lQm-CdIL4Atw0X8-8YkqqXOVEYnj2nD7YE2Ik8teymGKtI (Service: Ec2, Status Code: 403, Request ID: 996d1f95-b26a-45c4-bb75-85b2320d1d66)
-
-             */
             try {
 
                 RunInstancesResponse runResponse = ec2.runInstances(runRequest);
@@ -314,21 +309,15 @@ You are not authorized to perform this operation. Encoded authorization failure 
     }
 
     private static String getWorkerDataScript(){
-        final String bucket="dsp211-ass1-jars";
+        final String bucket="dsp211-ass1-jar";
         final String key="Worker.jar";
 
         String userData =
                 //run the file with bash
                 "#!/bin/bash\n"+
-                        "exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1\n"+
-//                        "wget https://" + bucket + ".s3.amazonaws.com/" + "tess4j-4.3.1.jar" +" -O " +"tess4j-4.3.1.jar"+ "\n" +
-//                        "sudo yum install tesseract-ocr\n"+
-//                        "sudo yum install --nogpgcheck tesseract\n" +
                         //download Worker jar
-                        "echo download "+key+ "\r\n" +
                         "wget https://" + bucket + ".s3.amazonaws.com/" + key +" -O " +key+ "\n" +
                         // run Worker
-                        "echo running "+key+"\r\n" +
                         "java -jar "+key+"\n";
 
         return userData;
