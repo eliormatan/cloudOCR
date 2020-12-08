@@ -253,13 +253,13 @@ public class Manager {
         return true;
     }
 
-    private static void startOrUpdateWorkers(int requiredWorkers) throws Exception {
+    private static void startOrUpdateWorkers(int requiredWorkers) {
         //manager is being run on EC2, so localApp should upload both Manager.jar AND worker.jar
         //to predefined s3 buckets and known keys.
         //check if number of workers is as required
         int currWorkers=0;
         try {
-            DescribeInstancesRequest request = DescribeInstancesRequest.builder().filters(Filter.builder().name("tag:Worker").values("Worker").build(),Filter.builder().name("instance-state-name").values("running","pending").build()).build();
+            DescribeInstancesRequest request = DescribeInstancesRequest.builder().filters(Filter.builder().name("tag:Worker").values("Worker").build(),Filter.builder().name("instance-state-name").values(new String[]{"running", "pending"}).build()).build();
             DescribeInstancesResponse response = ec2.describeInstances(request);
             //this is the number of workers, not sure if correct
             currWorkers = response.reservations().size();
@@ -294,15 +294,14 @@ public class Manager {
 
 
             List<Instance> instances = runResponse.instances();
-            printWithColor("added workes= "+Integer.toString(instances.size()));
+            printWithColor("added workers= "+Integer.toString(instances.size()));
 
             for (int i = 0; i < instances.size(); i++ ){
-                printWithColor(instances.get(i).instanceId()+ "idinstance");
+                printWithColor(instances.get(i).instanceId()+ " idinstance");
                 workerIds.add(instances.get(i).instanceId());
             }
             }catch (Ec2Exception e){
                 printWithColor(e.awsErrorDetails().errorMessage());
-                throw new Exception("run instance worker failed");
             }
         }
 

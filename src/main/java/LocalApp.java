@@ -14,6 +14,7 @@ import java.io.IOException;
 import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.logging.FileHandler;
 import java.util.logging.Level;
@@ -29,7 +30,6 @@ public class LocalApp {
     private static final String amiId = "ami-068dc7ca584573afe";
 
     private static Logger logger = Logger.getLogger(LocalApp.class.getName());
-
         //commit
         public static void main(String[] args) {
             try {
@@ -67,21 +67,20 @@ public class LocalApp {
 
             //define s3
             s3 = S3Client.builder().region(region).build();
-            //todo:delete
-//            deleteBucket("dsp211-ass1-jars");
-//            deleteBucket("bucket1607367918829");
-//            deleteBucket("bucket1607368997202");
-//            deleteBucket("bucket1607419251708");
 
-//            uploadJars();
+            uploadJars();
+//            deleteBucket("bucket1607447214493");
+//            deleteBucket("bucket1607447217045");
+//            deleteBucket("bucket1607447226020");
 
-//            /*
             createBucket(bucket, region);
             printWithColor("created bucket "+bucket);
+//            /*
+
             //define sqs
             sqs = SqsClient.builder().region(region).build();
             String l2m_qUrl = createQueueRequestAndGetUrl(local2ManagerQ);
-            String m2l_qUrl = createQueueRequestAndGetUrl(manager2LocalQ);
+            String m2l_qUrl = createQueueRequestAndGetUrl(manager2LocalQ+localId);
             printWithColor("created local2manager and manager2local queues: "+l2m_qUrl+" "+m2l_qUrl);
 
             //upload the input file to s3
@@ -126,21 +125,14 @@ public class LocalApp {
             }
 
             // download summary file from S3 and write it to output file
-            printWithColor("downloading summary from : bucket = "+bucket+" key = output"+outputS3Path);
+            printWithColor("downloading summary from : bucket = "+bucket+" key = output "+outputS3Path);
             s3.getObject(GetObjectRequest.builder().bucket(bucket).key("output"+outputS3Path+".html").build(),
                     ResponseTransformer.toFile(Paths.get(localId+output)));
 
-            //todo:we should let manager delete queues (after he gets terminated) to not affect other local apps
-            //delete sqs queues
-//            deleteSQSQueue(local2ManagerQ);
-//            deleteSQSQueue(manager2LocalQ);
-//            printWithColor("local2manager and manager2local queues deleted");
-
-            //delete s3 bucket
-            //todo:uncomment
-            //deleteBucket(bucket);
-            //printWithColor("deleted bucket "+bucket);
 //*/
+            //delete s3 bucket
+            deleteBucket(bucket);
+            printWithColor("deleted bucket "+bucket);
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -148,7 +140,6 @@ public class LocalApp {
         }
         printWithColor("finished elegantly!");
     }
-
 
 
     private static void createBucket(String bucket, Region region) {
@@ -202,55 +193,42 @@ public class LocalApp {
         sqs.deleteMessage(deleteRequest);
     }
 
-    private static void startManager() throws Exception {
+    private static void startManager() {
 
         if (managerIsActive())
             System.out.println("manager is already active...");
         else {
-            RunInstancesRequest runRequest = RunInstancesRequest.builder()
-                    .instanceType(InstanceType.T2_MICRO)
-                    .imageId(amiId)
-                    .maxCount(1)
-                    .minCount(1)
-                    .keyName("ass1")
-                    .iamInstanceProfile(IamInstanceProfileSpecification.builder().arn("arn:aws:iam::794818403225:instance-profile/ami-dsp211-ass1").build())
-                    .securityGroupIds("sg-0630dc054e0184c80")
-                    .userData(Base64.getEncoder().encodeToString(getUserDataScript().getBytes()))
-                    .build();
-
-            RunInstancesResponse response = ec2.runInstances(runRequest);
-
-            String instanceId = response.instances().get(0).instanceId();
 
             Tag tag = Tag.builder()
                     .key("Manager")
                     .value("Manager")
                     .build();
+            TagSpecification tags = TagSpecification.builder().tags(tag).resourceType(ResourceType.INSTANCE).build();
 
-            CreateTagsRequest tagRequest = CreateTagsRequest.builder()
-                    .resources(instanceId)
-                    .tags(tag)
+            RunInstancesRequest runRequest = RunInstancesRequest.builder()
+                    .instanceType(InstanceType.T2_MICRO)
+                    .imageId(amiId)
+                    .maxCount(1)
+                    .minCount(1)
+                    .keyName("dspass1")
+                    .iamInstanceProfile(IamInstanceProfileSpecification.builder().arn("arn:aws:iam::320131450129:instance-profile/dspass1").build())
+                    .securityGroupIds("sg-0eead8b108fc9f860")
+                    .userData(Base64.getEncoder().encodeToString(getUserDataScript().getBytes()))
+                    .instanceInitiatedShutdownBehavior("terminate") //added
+                    .tagSpecifications(tags)//added
                     .build();
 
-            try {
-                ec2.createTags(tagRequest);
-                System.out.printf(
-                        "Successfully started EC2 instance (Manager tag) %s based on AMI %s",
-                        instanceId, amiId);
-
-            } catch (Ec2Exception e) {
-                e.printStackTrace();
-            }
+            RunInstancesResponse response = ec2.runInstances(runRequest);
             System.out.println("done");
         }
     }
-    private static boolean managerIsActive() throws Exception {
+    private static boolean managerIsActive() {
         boolean isActive=false;
 
         try {
 
            DescribeInstancesRequest request = DescribeInstancesRequest.builder()
-                            .filters(Filter.builder().name("tag:Manager").values("Manager").build(),Filter.builder().name("instance-state-name").values("running","pending").build()).build();
+                            .filters(Filter.builder().name("tag:Manager").values("Manager").build(),Filter.builder().name("instance-state-name").values(new String[]{"running", "pending"}).build()).build();
 
             DescribeInstancesResponse response = ec2.describeInstances(request);
             printWithColor("is manager not active? "+response.reservations().isEmpty());
@@ -318,7 +296,7 @@ public class LocalApp {
     }
 
     private static String getUserDataScript() {
-        final String bucket="dsp211-ass1-jars";
+        final String bucket="dsp211-ass1-jar";
         final String key="Manager.jar";
 
                 String userData =
@@ -331,7 +309,8 @@ public class LocalApp {
                         "wget https://" + bucket + ".s3.amazonaws.com/" + key +" -O " +key+ "\n" +
                         // run Manager
                         "echo running "+key+"\r\n" +
-                        "java -jar "+key+"\n";
+                        "java -jar "+key+"\n" +
+                        "shutdown now";//added
 
         return userData;
     }
@@ -341,23 +320,20 @@ public class LocalApp {
         try {
 /*
             s3.createBucket(CreateBucketRequest
-                    .builder().bucket("dsp211-ass1-jars")
+                    .builder().bucket("dsp211-ass1-jar")
                     .createBucketConfiguration(CreateBucketConfiguration.builder().build()).build());
                             //.locationConstraint(region.id()).build()).build());
-
             s3.putObject(PutObjectRequest.builder()
-                            .bucket("dsp211-ass1-jars")
-                            .key("Manager.jar").acl(ObjectCannedACL.PUBLIC_READ)
-                            .build(),
-                    Paths.get("Manager.jar"));
-
-                    */
-            s3.putObject(PutObjectRequest.builder()
-                            .bucket("dsp211-ass1-jars")
+                            .bucket("dsp211-ass1-jar")
                             .key("Worker.jar").acl(ObjectCannedACL.PUBLIC_READ)
                             .build(),
                     Paths.get("Worker.jar"));
-
+                    */
+            s3.putObject(PutObjectRequest.builder()
+                            .bucket("dsp211-ass1-jar")
+                            .key("Manager.jar").acl(ObjectCannedACL.PUBLIC_READ)
+                            .build(),
+                    Paths.get("Manager.jar"));
 
         }catch (S3Exception e){
             e.printStackTrace();
