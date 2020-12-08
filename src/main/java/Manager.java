@@ -14,6 +14,7 @@ import java.net.URL;
 import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -49,7 +50,7 @@ public class Manager {
         }
 
         final ThreadPoolExecutor executor = (ThreadPoolExecutor) Executors.newFixedThreadPool(4);
-
+        workerIds=new LinkedList<>();
         Region region = Region.US_EAST_1;
         ec2 = Ec2Client.builder().region(region).build();
         sqs = SqsClient.builder().region(region).build();
@@ -177,7 +178,10 @@ public class Manager {
 
 //                STEP 6: Manager bootstraps nodes to process messages
 //                start workers and bootstrap them
-                    startOrUpdateWorkers(requiredWorkers);
+                    try {
+                        startOrUpdateWorkers(requiredWorkers);
+                    } catch (Exception e) {
+                    }
                     printWithColor("workers boosted");
 //
 //
@@ -206,13 +210,13 @@ public class Manager {
         }
 
         //terminate workers
-        TerminateInstancesRequest termRequest = TerminateInstancesRequest.builder().instanceIds(workerIds).build();
-        TerminateInstancesResponse termResponse = ec2.terminateInstances(termRequest);
-        printWithColor("workers killed");
+        //todo:uncom
+//        TerminateInstancesRequest termRequest = TerminateInstancesRequest.builder().instanceIds(workerIds).build();
+//        TerminateInstancesResponse termResponse = ec2.terminateInstances(termRequest);
+//        printWithColor("workers killed");
 
 
         //delete queues
-        //todo:we must wait for all localapps to download summary files first, by checking if their buckets exist
         while(!allBucketsAreDeleted()){
             try {
                 Thread.sleep(1000);
@@ -228,7 +232,8 @@ public class Manager {
         printWithColor("local2manager and manager2local queues deleted");
 
         //terminate Manager
-        DescribeInstancesRequest request = DescribeInstancesRequest.builder().filters(Filter.builder().name("tag:Manager").build()).build();
+
+        DescribeInstancesRequest request = DescribeInstancesRequest.builder().filters(Filter.builder().name("tag:Manager").values("Manager").build()).build();
         DescribeInstancesResponse response = ec2.describeInstances(request);
         String managerId = response.reservations().get(0).instances().get(0).instanceId();
         printWithColor("managerId(supposed to be not null): "+managerId);
@@ -243,45 +248,66 @@ public class Manager {
         return s3.listBuckets().buckets().size()==1;
     }
 
-    private static void startOrUpdateWorkers(int requiredWorkers) {
+    private static void startOrUpdateWorkers(int requiredWorkers) throws Exception {
         //manager is being run on EC2, so localApp should upload both Manager.jar AND worker.jar
         //to predefined s3 buckets and known keys.
         //check if number of workers is as required
-        DescribeInstancesRequest request = DescribeInstancesRequest.builder().filters(Filter.builder().name("tag:Worker").build()).build();
-        DescribeInstancesResponse response = ec2.describeInstances(request);
-        //this is the number of workers, not sure if correct
-        int currWorkers = response.reservations().size();
-        printWithColor("number of active workers: "+currWorkers+" and required workers: "+requiredWorkers);
+        int currWorkers=0;
+        try {
+            DescribeInstancesRequest request = DescribeInstancesRequest.builder().filters(Filter.builder().name("tag:Worker").values("Worker").build(),Filter.builder().name("instance-state-name").values("running","pending").build()).build();
+            DescribeInstancesResponse response = ec2.describeInstances(request);
+            //this is the number of workers, not sure if correct
+            currWorkers = response.reservations().size();
+            printWithColor("number of active workers: "+currWorkers+" and required workers: "+requiredWorkers);
+        } catch (Ec2Exception e) {
+            printWithColor(e.awsErrorDetails().errorMessage());
+        }
 
         if(currWorkers < 19 && currWorkers < requiredWorkers){
             int neededWorkers = requiredWorkers - currWorkers;
             printWithColor("needed workers= "+neededWorkers+" =required-active = "+requiredWorkers+" - "+currWorkers);
-            ec2 = Ec2Client.create();
             Tag tag = Tag.builder()
                     .key("Worker")
                     .value("Worker")
                     .build();
-            TagSpecification tags = TagSpecification.builder().tags(tag).build();
+            TagSpecification tags = TagSpecification.builder().tags(tag).resourceType(ResourceType.INSTANCE).build();
 
             RunInstancesRequest runRequest = RunInstancesRequest.builder()
                     .instanceType(InstanceType.T2_MICRO)
                     .imageId(amiId)
-                    .maxCount(neededWorkers)
+                    .maxCount(1)
                     .minCount(1)
                     .keyName("ass1")
                     .iamInstanceProfile(IamInstanceProfileSpecification.builder().arn("arn:aws:iam::794818403225:instance-profile/ami-dsp211-ass1").build())
-                    //.userData(Base64.getEncoder().encodeToString(getWorkerDataScript().getBytes()))
+                    .securityGroupIds("sg-0630dc054e0184c80")
+                    .userData(Base64.getEncoder().encodeToString(getWorkerDataScript().getBytes()))
                     .tagSpecifications(tags)
                     .build();
 
+            //todo: get permissions to runInstance..
+            // why does it works in localapp but here not?!
+            /*
+<13>Dec  6 22:56:31 user-data: 22:56:22.431 [pool-1-thread-1] DEBUG org.apache.http.wire - http-outgoing-2 >> "Action=RunInstances&Version=2016-11-15&ImageId=ami-068dc7ca584573afe&InstanceType=t2.micro&KeyName=ass1&MaxCount=3&MinCount=1&UserData=IyEvYmluL2Jhc2gKZXhlYyA%2BID4odGVlIC92YXIvbG9nL3VzZXItZGF0YS5sb2d8bG9nZ2VyIC10IHVzZXItZGF0YSAtcyAyPi9kZXYvY29uc29sZSkgMj4mMQplY2hvIGRvd25sb2FkIFdvcmtlci5qYXINCndnZXQgaHR0cHM6Ly9kc3AyMTEtYXNzMS1qYXJzLnMzLmFtYXpvbmF3cy5jb20vV29ya2VyLmphciAtTyBXb3JrZXIuamFyCmVjaG8gcnVubmluZyBXb3JrZXIuamFyDQpqYXZhIC1qYXIgV29ya2VyLmphcgo%3D&IamInstanceProfile.Arn=arn%3Aaws%3Aiam%3A%3A794818403225%3Ainstance-profile%2Fami-dsp211-ass1&TagSpecification.1.ResourceType=instance&TagSpecification.1.Tag.1.Key=Worker&TagSpecification.1.Tag.1.Value=Worker"
+<13>Dec  6 22:56:31 user-data: 22:56:22.863 [pool-1-thread-1] DEBUG org.apache.http.wire - http-outgoing-2 << "HTTP/1.1 403 Forbidden[\r][\n]"
+<13>Dec  6 22:56:31 user-data: 22:56:22.889 [pool-1-thread-1] DEBUG software.amazon.awssdk.request - Received error response: software.amazon.awssdk.services.ec2.model.Ec2Exception:
+You are not authorized to perform this operation. Encoded authorization failure message: 0MMOXH_XJnmgp2JSBpTKaKKdRqTJPDBS814CvNUpEBm_Z8sndys3ljrowrNZxIYTvkk1yHQslf5K_4dQzRwiNb4oLaDmvNFwwPEJaQtG4l7tieKAjR6GllOPnv_uOeqnBcooCkYYf1tk8h8IYU5FSO1cdbU6jz8IpEwZ8EvaaWHO9zFifhROLyFc1g9iJu-h4ojO1977wC7r4L85dn4MLDINDSufWNfud38cfr_qJ4KmS-gh9zyVYA3YKBrAYR2_gUmKzIODNWf61DBk27YsAuZe6mqjHs0JpDX9erF1oH0O0wq41TQhKz2ujnqSb2Vd1SljnMCFYP1igRnp-aMq14r4kKMYGrHcuvjamKW08lvKm6pHQwBsFC0-MSw-kiVRnAvQppJG5blwfyVjA1Yt7b7nqDo2KZ9CnAdXL4MwspE41cN0_SsxrQpdDw2h6lpWWd2fNZEiKVUCjDL2Oh2rGSGH64X9l4_epQkRipvCIVNFScup7lQm-CdIL4Atw0X8-8YkqqXOVEYnj2nD7YE2Ik8teymGKtI (Service: Ec2, Status Code: 403, Request ID: 996d1f95-b26a-45c4-bb75-85b2320d1d66)
 
-            RunInstancesResponse runResponse = ec2.runInstances(runRequest);
+             */
+            try {
+
+                RunInstancesResponse runResponse = ec2.runInstances(runRequest);
+
 
             List<Instance> instances = runResponse.instances();
-            printWithColor("added workes= "+Integer.toString(instances.size()-1));
+            printWithColor("added workes= "+Integer.toString(instances.size()));
 
             for (int i = 0; i < instances.size(); i++ ){
+                printWithColor(instances.get(i).instanceId()+ "idinstance");
                 workerIds.add(instances.get(i).instanceId());
+            }
+            }catch (Ec2Exception e){
+                printWithColor(e.awsErrorDetails().errorMessage());
+                throw new Exception("run instance worker failed");
             }
         }
 
@@ -294,6 +320,10 @@ public class Manager {
         String userData =
                 //run the file with bash
                 "#!/bin/bash\n"+
+                        "exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1\n"+
+//                        "wget https://" + bucket + ".s3.amazonaws.com/" + "tess4j-4.3.1.jar" +" -O " +"tess4j-4.3.1.jar"+ "\n" +
+//                        "sudo yum install tesseract-ocr\n"+
+//                        "sudo yum install --nogpgcheck tesseract\n" +
                         //download Worker jar
                         "echo download "+key+ "\r\n" +
                         "wget https://" + bucket + ".s3.amazonaws.com/" + key +" -O " +key+ "\n" +

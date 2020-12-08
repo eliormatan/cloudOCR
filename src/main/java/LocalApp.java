@@ -67,7 +67,15 @@ public class LocalApp {
 
             //define s3
             s3 = S3Client.builder().region(region).build();
-            //uploadCode();
+            //todo:delete
+//            deleteBucket("dsp211-ass1-jars");
+//            deleteBucket("bucket1607367918829");
+//            deleteBucket("bucket1607368997202");
+//            deleteBucket("bucket1607419251708");
+
+//            uploadJars();
+
+//            /*
             createBucket(bucket, region);
             printWithColor("created bucket "+bucket);
             //define sqs
@@ -129,10 +137,10 @@ public class LocalApp {
 //            printWithColor("local2manager and manager2local queues deleted");
 
             //delete s3 bucket
-            deleteBucket(bucket);
-            printWithColor("deleted bucket "+bucket);
-
-
+            //todo:uncomment
+            //deleteBucket(bucket);
+            //printWithColor("deleted bucket "+bucket);
+//*/
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -194,7 +202,7 @@ public class LocalApp {
         sqs.deleteMessage(deleteRequest);
     }
 
-    private static void startManager() {
+    private static void startManager() throws Exception {
 
         if (managerIsActive())
             System.out.println("manager is already active...");
@@ -206,7 +214,8 @@ public class LocalApp {
                     .minCount(1)
                     .keyName("ass1")
                     .iamInstanceProfile(IamInstanceProfileSpecification.builder().arn("arn:aws:iam::794818403225:instance-profile/ami-dsp211-ass1").build())
-                    // .userData(Base64.getEncoder().encodeToString(getUserDataScript().getBytes()))
+                    .securityGroupIds("sg-0630dc054e0184c80")
+                    .userData(Base64.getEncoder().encodeToString(getUserDataScript().getBytes()))
                     .build();
 
             RunInstancesResponse response = ec2.runInstances(runRequest);
@@ -235,26 +244,20 @@ public class LocalApp {
             System.out.println("done");
         }
     }
-    private static boolean managerIsActive() {
+    private static boolean managerIsActive() throws Exception {
         boolean isActive=false;
 
         try {
 
-            //option 1 - filter instances by manager tag
-            DescribeInstancesRequest request = DescribeInstancesRequest.builder().maxResults(1).filters(Filter.builder().name("tag:Manager").build()).build();
+           DescribeInstancesRequest request = DescribeInstancesRequest.builder()
+                            .filters(Filter.builder().name("tag:Manager").values("Manager").build(),Filter.builder().name("instance-state-name").values("running","pending").build()).build();
+
             DescribeInstancesResponse response = ec2.describeInstances(request);
-
-            //option 2 - get all instance's tags , then search for manager
-            /*DescribeTagsResponse response = ec2.describeTags();
-            List<TagDescription> tags = response.tags();
-            if(tags.contains("Manager"))
-                isActive=true;
-             */
-
+            printWithColor("is manager not active? "+response.reservations().isEmpty());
             if(!response.reservations().isEmpty())
                 isActive=true;
             } catch (Ec2Exception e) {
-            System.err.println(e.awsErrorDetails().errorMessage());
+            printWithColor(e.awsErrorDetails().errorMessage());
         }
 
         return isActive;
@@ -277,7 +280,7 @@ public class LocalApp {
             sqs.deleteQueue(deleteQueueRequest);
 
         } catch (SqsException e) {
-            System.err.println(e.awsErrorDetails().errorMessage());
+            printWithColor(e.awsErrorDetails().errorMessage());
         }
     }
 
@@ -321,6 +324,8 @@ public class LocalApp {
                 String userData =
                 //run the file with bash
                 "#!/bin/bash\n"+
+                        "exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1\n"+
+
                         //download Manager jar
                         "echo download "+key+ "\r\n" +
                         "wget https://" + bucket + ".s3.amazonaws.com/" + key +" -O " +key+ "\n" +
@@ -332,22 +337,28 @@ public class LocalApp {
     }
 
     // use only once
-    private static void uploadCode(){
+    private static void uploadJars(){
         try {
+/*
             s3.createBucket(CreateBucketRequest
                     .builder().bucket("dsp211-ass1-jars")
                     .createBucketConfiguration(CreateBucketConfiguration.builder().build()).build());
                             //.locationConstraint(region.id()).build()).build());
+
             s3.putObject(PutObjectRequest.builder()
                             .bucket("dsp211-ass1-jars")
                             .key("Manager.jar").acl(ObjectCannedACL.PUBLIC_READ)
                             .build(),
                     Paths.get("Manager.jar"));
+
+                    */
             s3.putObject(PutObjectRequest.builder()
                             .bucket("dsp211-ass1-jars")
                             .key("Worker.jar").acl(ObjectCannedACL.PUBLIC_READ)
                             .build(),
                     Paths.get("Worker.jar"));
+
+
         }catch (S3Exception e){
             e.printStackTrace();
         }
@@ -361,7 +372,7 @@ public class LocalApp {
         final String ANSI_RESET = "\u001B[0m";
         final String ANSI_CYAN_BACKGROUND = "\u001B[46m";
         final String ANSI_WHITE_BACKGROUND = "\u001B[47m";
-        System.out.println(ANSI_CYAN_BACKGROUND +ANSI_BLACK + string + ANSI_RESET);
+        //System.out.println(ANSI_CYAN_BACKGROUND +ANSI_BLACK + string + ANSI_RESET);
         logger.info(string);
 
     }

@@ -141,8 +141,14 @@ public class Worker {
         //TESSERACT PART
         //create my OCR reader
         Tesseract reader = new Tesseract();
-        File tessDataFolder = LoadLibs.extractTessResources("tessdata");
-        reader.setDatapath(tessDataFolder.getPath());
+//        File tessDataFolder = LoadLibs.extractTessResources("tessdata");
+
+//        printWithColor(tessDataFolder.getPath()+" getpath");
+//        printWithColor(tessDataFolder.getParent()+" getparent");
+//        printWithColor(tessDataFolder.getAbsolutePath()+ "getAbsolute");
+
+        reader.setDatapath("/usr/share/tesseract");
+//        reader.setDatapath(tessDataFolder.getPath());
         //perform OCR on image_to_read and write into HTML file result.html
         try {
             //perform OCR
