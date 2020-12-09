@@ -9,16 +9,13 @@ import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.*;
 
 import java.io.*;
-import java.lang.reflect.Array;
 import java.net.URL;
 import java.nio.file.Paths;
-import java.util.Arrays;
-import java.util.Base64;
-import java.util.LinkedList;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.FileHandler;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -48,8 +45,7 @@ public class Manager {
         } catch (IOException e) {
             e.printStackTrace();
         }
-
-        final ThreadPoolExecutor executor = (ThreadPoolExecutor) Executors.newFixedThreadPool(4);
+        final ThreadPoolExecutor executor = (ThreadPoolExecutor) Executors.newFixedThreadPool(5);
         workerIds=new LinkedList<>();
         bucketIds=new LinkedList<>();
         manager2localqueues=new LinkedList<>();
@@ -80,6 +76,7 @@ public class Manager {
                     .build();
             List<Message> messages = sqs.receiveMessage(receiveRequest).messages();
             for (Message message : messages) {
+                AtomicInteger requiredWorkers = new AtomicInteger(0);
                 int linesPerWorker;
                 String localId;
                 String key;
@@ -95,6 +92,7 @@ public class Manager {
                 key = splitMessage[2];
                 linesPerWorker = Integer.parseInt(splitMessage[4]);
                 localId = splitMessage[3];
+                manager2localqueues.add(manager2LocalQ + localId);
                 if (splitMessage.length > 5 && splitMessage[5].equals("terminate")){
                     terminate = true;
                     printWithColor("TERMINATE == TRUE");
@@ -103,14 +101,10 @@ public class Manager {
                 Runnable newMessage = () -> {
                     //manager 2 local queue url = manager2LocalQUrl
                     String manager2LocalQUrl = getQueueRequestAndGetUrl(manager2LocalQ + localId);
-                    manager2localqueues.add(manager2LocalQ + localId);
                     printWithColor("get manager2local "+manager2LocalQUrl);
 
                     printWithColor("thread = "+ Thread.currentThread().getId() + " taking care of new task " + localId);
                     String newTaskFileLink;
-                    int requiredWorkers;
-
-//                    printWithColor("message split: " + bucket + " " + key + " " + linesPerWorker + " " + localId);
 
                     //open/create input file and name it according to the localapp ID that sent it
                     try {
@@ -178,29 +172,39 @@ public class Manager {
 
                     printWithColor("new task in " + local2ManagerQUrl + "queue deleted");
 
-                    requiredWorkers = (int) Math.ceil((double) numberOfLines / linesPerWorker);
+                    requiredWorkers.set((int) Math.ceil((double) numberOfLines / linesPerWorker));
                     printWithColor("required workers = " + requiredWorkers + " =numberOfLines / linesPerWorker =" + numberOfLines + "/ " + linesPerWorker);
 
-//                STEP 6: Manager bootstraps nodes to process messages
-//                start workers and bootstrap them
-                    try {
-                        startOrUpdateWorkers(requiredWorkers);
-                    } catch (Exception e) {
-                    }
-                    printWithColor("workers boosted");
 //
-//
+                    receiveDoneOcrTasks(numberOfLines, localId, bucket, worker2ManagerQUrl, manager2LocalQUrl);
 //                STEP 11: Manager reads all the Workers' messages from SQS and creates one summary file
 //                STEP 12: Manager uploads summary file to S3
 //                STEP 13: Manager posts an SQS message about summary file
-                    receiveDoneOcrTasks(numberOfLines, localId, bucket, worker2ManagerQUrl, manager2LocalQUrl);
                 };
                 executor.execute(newMessage);
+                //todo:add runnable
+//                Runnable getMessage = () -> {
+//                }
+//                STEP 6: Manager bootstraps nodes to process messages
+//                start workers and bootstrap them
+                    try {
+                        int req=requiredWorkers.get();
+                        while (req==0){
+                            Thread.sleep(1000);
+                            req=requiredWorkers.get();
+                        }
+                        startOrUpdateWorkers(req);
+                        requiredWorkers.set(0);
+                    } catch (Exception e) {
+                        printWithColor(e.getMessage());
+                    }
+                    printWithColor("workers boosted");
+//
             }
             try {
-                Thread.sleep(10000);
+                Thread.sleep(1000);
             } catch (InterruptedException e) {
-                e.printStackTrace();
+                printWithColor(e.getMessage());
             }
         }
 
@@ -253,6 +257,7 @@ public class Manager {
         return true;
     }
 
+    //todo: why it is create extra workers?
     private static void startOrUpdateWorkers(int requiredWorkers) {
         //manager is being run on EC2, so localApp should upload both Manager.jar AND worker.jar
         //to predefined s3 buckets and known keys.
@@ -262,7 +267,11 @@ public class Manager {
             DescribeInstancesRequest request = DescribeInstancesRequest.builder().filters(Filter.builder().name("tag:Worker").values("Worker").build(),Filter.builder().name("instance-state-name").values(new String[]{"running", "pending"}).build()).build();
             DescribeInstancesResponse response = ec2.describeInstances(request);
             //this is the number of workers, not sure if correct
-            currWorkers = response.reservations().size();
+            List<Reservation> reservations=response.reservations();
+            List<Instance> instances = null;
+            for(Reservation r:reservations){
+                currWorkers = r.instances().size();
+            }
             printWithColor("number of active workers: "+currWorkers+" and required workers: "+requiredWorkers);
         } catch (Ec2Exception e) {
             printWithColor(e.awsErrorDetails().errorMessage());
@@ -282,9 +291,9 @@ public class Manager {
                     .imageId(amiId)
                     .maxCount(neededWorkers)
                     .minCount(1)
-                    .keyName("dspass1")
-                    .iamInstanceProfile(IamInstanceProfileSpecification.builder().arn("arn:aws:iam::320131450129:instance-profile/dspass1").build())
-                    .securityGroupIds("sg-0eead8b108fc9f860")
+                    .keyName("ass1")
+                    .iamInstanceProfile(IamInstanceProfileSpecification.builder().arn("arn:aws:iam::794818403225:instance-profile/ami-dsp211-ass1").build())
+                    .securityGroupIds("sg-0630dc054e0184c80")
                     .userData(Base64.getEncoder().encodeToString(getWorkerDataScript().getBytes()))
                     .tagSpecifications(tags)
                     .build();

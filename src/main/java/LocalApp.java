@@ -30,8 +30,9 @@ public class LocalApp {
     private static final String amiId = "ami-068dc7ca584573afe";
 
     private static Logger logger = Logger.getLogger(LocalApp.class.getName());
-        //commit
+
         public static void main(String[] args) {
+
             try {
                 initLogger("LocalAppLogger");
             } catch (IOException e) {
@@ -68,14 +69,15 @@ public class LocalApp {
             //define s3
             s3 = S3Client.builder().region(region).build();
 
-            uploadJars();
-//            deleteBucket("bucket1607447214493");
-//            deleteBucket("bucket1607447217045");
-//            deleteBucket("bucket1607447226020");
+//            deleteBucket("bucket1607512673423");
+//            deleteBucket("bucket1607511657852");
 
+//            uploadJars();
+
+
+//            /*
             createBucket(bucket, region);
             printWithColor("created bucket "+bucket);
-//            /*
 
             //define sqs
             sqs = SqsClient.builder().region(region).build();
@@ -100,7 +102,7 @@ public class LocalApp {
             }
 
             //check if a 'Manager' node is active on the EC2 cloud. If it is not, the application will start the manager node.
-            startManager();
+//            startManager();
 
             while (!done) {
                 // receive messages from the queue
@@ -119,6 +121,17 @@ public class LocalApp {
                 }
                 try {
                     Thread.sleep(1000);
+                    try{
+                        GetQueueUrlRequest getQueueRequest = GetQueueUrlRequest.builder()
+                                .queueName(local2ManagerQ)
+                                .build();
+                        String queueUrl = sqs.getQueueUrl(getQueueRequest).queueUrl();
+                    }catch (QueueDoesNotExistException e){
+                        printWithColor("manager shutdown already, could not serve local app");
+                        deleteByCatch(manager2LocalQ+localId,bucket);
+                        System.exit(1);
+                    }
+
                 } catch (InterruptedException e) {
                     e.printStackTrace();
                 }
@@ -129,16 +142,25 @@ public class LocalApp {
             s3.getObject(GetObjectRequest.builder().bucket(bucket).key("output"+outputS3Path+".html").build(),
                     ResponseTransformer.toFile(Paths.get(localId+output)));
 
-//*/
             //delete s3 bucket
             deleteBucket(bucket);
             printWithColor("deleted bucket "+bucket);
+
+//            */
 
         } catch (Exception e) {
             e.printStackTrace();
             System.exit(1);
         }
         printWithColor("finished elegantly!");
+
+
+        //todo:todo readme
+    }
+
+    private static void deleteByCatch(String queue, String bucket) {
+            deleteSQSQueue(queue);
+            deleteBucket(bucket);
     }
 
 
@@ -210,12 +232,12 @@ public class LocalApp {
                     .imageId(amiId)
                     .maxCount(1)
                     .minCount(1)
-                    .keyName("dspass1")
-                    .iamInstanceProfile(IamInstanceProfileSpecification.builder().arn("arn:aws:iam::320131450129:instance-profile/dspass1").build())
-                    .securityGroupIds("sg-0eead8b108fc9f860")
+                    .keyName("ass1")
+                    .iamInstanceProfile(IamInstanceProfileSpecification.builder().arn("arn:aws:iam::794818403225:instance-profile/ami-dsp211-ass1").build())
+                    .securityGroupIds("sg-0630dc054e0184c80")
                     .userData(Base64.getEncoder().encodeToString(getUserDataScript().getBytes()))
-                    .instanceInitiatedShutdownBehavior("terminate") //added
-                    .tagSpecifications(tags)//added
+                    .instanceInitiatedShutdownBehavior("terminate")
+                    .tagSpecifications(tags)
                     .build();
 
             RunInstancesResponse response = ec2.runInstances(runRequest);
@@ -296,7 +318,7 @@ public class LocalApp {
     }
 
     private static String getUserDataScript() {
-        final String bucket="dsp211-ass1-jar";
+        final String bucket="dsp211-ass1-jars";
         final String key="Manager.jar";
 
                 String userData =
@@ -309,8 +331,8 @@ public class LocalApp {
                         "wget https://" + bucket + ".s3.amazonaws.com/" + key +" -O " +key+ "\n" +
                         // run Manager
                         "echo running "+key+"\r\n" +
-                        "java -jar "+key+"\n" +
-                        "shutdown now";//added
+                        "java -jar "+key+"\n"
+                      + "shutdown now";
 
         return userData;
     }
@@ -318,19 +340,20 @@ public class LocalApp {
     // use only once
     private static void uploadJars(){
         try {
-/*
-            s3.createBucket(CreateBucketRequest
-                    .builder().bucket("dsp211-ass1-jar")
+
+         /*   s3.createBucket(CreateBucketRequest
+                    .builder().bucket("dsp211-ass1-jars")
                     .createBucketConfiguration(CreateBucketConfiguration.builder().build()).build());
                             //.locationConstraint(region.id()).build()).build());
+
             s3.putObject(PutObjectRequest.builder()
-                            .bucket("dsp211-ass1-jar")
+                            .bucket("dsp211-ass1-jars")
                             .key("Worker.jar").acl(ObjectCannedACL.PUBLIC_READ)
                             .build(),
                     Paths.get("Worker.jar"));
-                    */
+  */
             s3.putObject(PutObjectRequest.builder()
-                            .bucket("dsp211-ass1-jar")
+                            .bucket("dsp211-ass1-jars")
                             .key("Manager.jar").acl(ObjectCannedACL.PUBLIC_READ)
                             .build(),
                     Paths.get("Manager.jar"));
