@@ -12,6 +12,7 @@ import java.io.*;
 import java.net.URL;
 import java.nio.file.Paths;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -34,7 +35,10 @@ public class Manager {
     private static final String done_ocr_task = "done ocr task";
     private static final String new_task = "new task";
     private static final String done_task = "done task";
-    private static List<String> workerIds, bucketIds, manager2localqueues;
+    private static List<String> workerIds;
+    private static List<String> bucketIds;
+    public static AtomicInteger requiredWorkers = new AtomicInteger(0);
+    public static ConcurrentHashMap<String, Integer> numberOfLinesMap;
 
     private static Logger logger = Logger.getLogger(Manager.class.getName());
 
@@ -48,7 +52,8 @@ public class Manager {
         final ThreadPoolExecutor executor = (ThreadPoolExecutor) Executors.newFixedThreadPool(5);
         workerIds=new LinkedList<>();
         bucketIds=new LinkedList<>();
-        manager2localqueues=new LinkedList<>();
+        List<String> manager2localqueues = new LinkedList<>();
+        numberOfLinesMap = new ConcurrentHashMap<>();
         Region region = Region.US_EAST_1;
         ec2 = Ec2Client.builder().region(region).build();
         sqs = SqsClient.builder().region(region).build();
@@ -76,7 +81,6 @@ public class Manager {
                     .build();
             List<Message> messages = sqs.receiveMessage(receiveRequest).messages();
             for (Message message : messages) {
-                AtomicInteger requiredWorkers = new AtomicInteger(0);
                 int linesPerWorker;
                 String localId;
                 String key;
@@ -98,108 +102,40 @@ public class Manager {
                     printWithColor("TERMINATE == TRUE");
                 }
                 bucketIds.add(bucket);
-                Runnable newMessage = () -> {
-                    //manager 2 local queue url = manager2LocalQUrl
-                    String manager2LocalQUrl = getQueueRequestAndGetUrl(manager2LocalQ + localId);
-                    printWithColor("get manager2local "+manager2LocalQUrl);
 
-                    printWithColor("thread = "+ Thread.currentThread().getId() + " taking care of new task " + localId);
-                    String newTaskFileLink;
+//              STEP 5: Manager creates an SQS message for each URL in the list of images
+                handleLocalInput handleLocalInput = new handleLocalInput(localId, key, bucket, linesPerWorker, manager2WorkerQUrl, local2ManagerQUrl);
+                executor.execute(handleLocalInput);
 
-                    //open/create input file and name it according to the localapp ID that sent it
-                    try {
-                        File input = new File("input" + localId + ".txt");
-                        if (!input.exists()) {
-                            input.createNewFile();
-                        }
-                    } catch (IOException e) {
-                        e.printStackTrace();
+                //delete the "new task" message from local2managerQUrl sqs queue
+                DeleteMessageRequest deleteRequest = DeleteMessageRequest.builder()
+                        .queueUrl(local2ManagerQUrl)
+                        .receiptHandle(message.receiptHandle())
+                        .build();
+                sqs.deleteMessage(deleteRequest);
+
+//              STEP 6: Manager bootstraps nodes to process messages
+//              start workers and bootstrap them
+//              in order to start the required amount of workers we have to count the lines first, which means sending all messages to workers first...
+//              so we have to wait anyway.
+                try {
+                    int req=requiredWorkers.get();
+                    while (req==0){
+                        Thread.sleep(1000);
+                        req=requiredWorkers.get();
                     }
+                    startOrUpdateWorkers(req);
+                    requiredWorkers.set(0);
+                } catch (Exception e) {
+                    printWithColor(e.getMessage());
+                }
+                printWithColor("workers boosted");
 
-                    //build the input file's link from the received arguments to download from s3
-                    newTaskFileLink = "https://" + bucket + ".s3.amazonaws.com/" + key;
-                    //download the file - reference : https://www.baeldung.com/java-download-file
-                    try (BufferedInputStream in = new BufferedInputStream(new URL(newTaskFileLink).openStream());
-                         FileOutputStream fileOutputStream = new FileOutputStream("input" + localId + ".txt")) {
-                        byte[] dataBuffer = new byte[1024];
-                        int bytesRead;
-                        while ((bytesRead = in.read(dataBuffer, 0, 1024)) != -1) {
-                            fileOutputStream.write(dataBuffer, 0, bytesRead);
-                        }
-                    } catch (IOException e) {
-                        System.out.println(e.getMessage());
-                    }
-
-                    printWithColor("file downloaded from s3");
-
-                    //done with the input file, so we delete it from s3
-                    DeleteObjectRequest deleteObjectRequest = DeleteObjectRequest.builder().bucket(bucket).key(key).build();
-                    s3.deleteObject(deleteObjectRequest);
-
-                    printWithColor("file deleted from s3");
-
-
-                    //STEP 5: Manager creates an SQS message for each URL in the list of images
-                    //read lines (image links) from input file and create new image tasks for workers out of each line
-                    int numberOfLines = 0;
-                    try {
-                        BufferedReader reader = new BufferedReader(new FileReader("input" + localId + ".txt"));
-                        String line = reader.readLine();
-                        while (line != null) {
-                            numberOfLines++;
-                            queueNewImageTask(manager2WorkerQUrl, line, localId);
-                            printWithColor("sent new image task to manager2Worker queue " + new_image_task + "$" + localId + "$" + line);
-
-                            //onto the next line
-                            line = reader.readLine();
-                        }
-                        reader.close();
-                        //done reading all new image task lines, delete the file since we are done with it
-                        File input = new File("input" + localId + ".txt");
-                        input.delete();
-                        ;
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                    }
-                    printWithColor("done sending...sent " + numberOfLines + " masseges (new tasks to workers)");
-
-                    //delete the "new task" message from local2managerQUrl sqs queue
-                    DeleteMessageRequest deleteRequest = DeleteMessageRequest.builder()
-                            .queueUrl(local2ManagerQUrl)
-                            .receiptHandle(message.receiptHandle())
-                            .build();
-                    sqs.deleteMessage(deleteRequest);
-
-                    printWithColor("new task in " + local2ManagerQUrl + "queue deleted");
-
-                    requiredWorkers.set((int) Math.ceil((double) numberOfLines / linesPerWorker));
-                    printWithColor("required workers = " + requiredWorkers + " =numberOfLines / linesPerWorker =" + numberOfLines + "/ " + linesPerWorker);
-
-//
-                    receiveDoneOcrTasks(numberOfLines, localId, bucket, worker2ManagerQUrl, manager2LocalQUrl);
-//                STEP 11: Manager reads all the Workers' messages from SQS and creates one summary file
-//                STEP 12: Manager uploads summary file to S3
-//                STEP 13: Manager posts an SQS message about summary file
-                };
-                executor.execute(newMessage);
-                //todo:add runnable
-//                Runnable getMessage = () -> {
-//                }
-//                STEP 6: Manager bootstraps nodes to process messages
-//                start workers and bootstrap them
-                    try {
-                        int req=requiredWorkers.get();
-                        while (req==0){
-                            Thread.sleep(1000);
-                            req=requiredWorkers.get();
-                        }
-                        startOrUpdateWorkers(req);
-                        requiredWorkers.set(0);
-                    } catch (Exception e) {
-                        printWithColor(e.getMessage());
-                    }
-                    printWithColor("workers boosted");
-//
+//              STEP 11: Manager reads all the Workers' messages from SQS and creates one summary file
+//              STEP 12: Manager uploads summary file to S3
+//              STEP 13: Manager posts an SQS message about summary file
+                handleWorkerOutput handleWorkerOutput = new handleWorkerOutput(localId, bucket,numberOfLinesMap.get(localId), worker2ManagerQUrl);
+                executor.execute(handleWorkerOutput);
             }
             try {
                 Thread.sleep(1000);
@@ -244,6 +180,111 @@ public class Manager {
 
         //terminate Manager using shutdown command
 
+    }
+
+    //handle output from workers runnable class
+    public static class handleWorkerOutput implements Runnable{
+        String localId;
+        String bucket;
+        int numberOfLines;
+        String worker2ManagerQUrl;
+        public handleWorkerOutput(String localId, String bucket, int numberOfLines, String worker2ManagerQUrl){
+            this.localId = localId;
+            this.bucket = bucket;
+            this.numberOfLines = numberOfLines;
+            this.worker2ManagerQUrl = worker2ManagerQUrl;
+        }
+        public void run(){
+            receiveDoneOcrTasks(numberOfLines, localId, bucket, worker2ManagerQUrl);
+        }
+    }
+
+    //handle input from localApp runnable class
+    public static class handleLocalInput implements Runnable{
+        String localId;
+        String key;
+        String bucket;
+        int linesPerWorker;
+        String manager2WorkerQUrl;
+        String local2ManagerQUrl;
+
+        public handleLocalInput(String localId, String key, String bucket, int linesPerWorker, String manager2WorkerQUrl, String local2ManagerQUrl){
+            this.localId = localId;
+            this.key = key;
+            this.bucket = bucket;
+            this.linesPerWorker = linesPerWorker;
+            this.manager2WorkerQUrl = manager2WorkerQUrl;
+            this.local2ManagerQUrl = local2ManagerQUrl;
+        }
+        public void run(){
+            printWithColor("thread = "+ Thread.currentThread().getId() + " taking care of new task " + localId);
+            String newTaskFileLink;
+
+            //open/create input file and name it according to the localapp ID that sent it
+            try {
+                File input = new File("input" + localId + ".txt");
+                if (!input.exists()) {
+                    input.createNewFile();
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+
+            //build the input file's link from the received arguments to download from s3
+            newTaskFileLink = "https://" + bucket + ".s3.amazonaws.com/" + key;
+            //download the file - reference : https://www.baeldung.com/java-download-file
+            try (BufferedInputStream in = new BufferedInputStream(new URL(newTaskFileLink).openStream());
+                 FileOutputStream fileOutputStream = new FileOutputStream("input" + localId + ".txt")) {
+                byte[] dataBuffer = new byte[1024];
+                int bytesRead;
+                while ((bytesRead = in.read(dataBuffer, 0, 1024)) != -1) {
+                    fileOutputStream.write(dataBuffer, 0, bytesRead);
+                }
+            } catch (IOException e) {
+                System.out.println(e.getMessage());
+            }
+
+            printWithColor("file downloaded from s3");
+
+            //STEP 5: Manager creates an SQS message for each URL in the list of images
+            //read lines (image links) from input file and create new image tasks for workers out of each line
+            int numberOfLines = 0;
+            try {
+                BufferedReader reader = new BufferedReader(new FileReader("input" + localId + ".txt"));
+                String line = reader.readLine();
+                while (line != null) {
+                    numberOfLines++;
+                    queueNewImageTask(manager2WorkerQUrl, line, localId);
+                    printWithColor("sent new image task to manager2Worker queue " + new_image_task + "$" + localId + "$" + line);
+
+                    //onto the next line
+                    line = reader.readLine();
+                }
+                reader.close();
+                //done reading all new image task lines, delete the file since we are done with it
+                File input = new File("input" + localId + ".txt");
+                input.delete();
+                ;
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+            //save the number of lines for this specific localApp
+            numberOfLinesMap.put(localId, numberOfLines);
+            printWithColor("done sending...sent " + numberOfLines + " masseges (new tasks to workers)");
+
+            //delete the "new task" message from local2managerQUrl sqs queue
+            //todo: not needed here, let main thread delete the message
+//            DeleteMessageRequest deleteRequest = DeleteMessageRequest.builder()
+//                    .queueUrl(local2ManagerQUrl)
+//                    .receiptHandle(message.receiptHandle())
+//                    .build();
+//            sqs.deleteMessage(deleteRequest);
+//
+//            printWithColor("new task in " + local2ManagerQUrl + "queue deleted");
+
+            requiredWorkers.set((int) Math.ceil((double) numberOfLines / linesPerWorker));
+            printWithColor("required workers = " + requiredWorkers + " =numberOfLines / linesPerWorker =" + numberOfLines + "/ " + linesPerWorker);
+        }
     }
 
     public static boolean allBucketsAreDeleted() {
@@ -291,9 +332,9 @@ public class Manager {
                     .imageId(amiId)
                     .maxCount(neededWorkers)
                     .minCount(1)
-                    .keyName("ass1")
-                    .iamInstanceProfile(IamInstanceProfileSpecification.builder().arn("arn:aws:iam::794818403225:instance-profile/ami-dsp211-ass1").build())
-                    .securityGroupIds("sg-0630dc054e0184c80")
+                    .keyName("dspass1")
+                    .iamInstanceProfile(IamInstanceProfileSpecification.builder().arn("arn:aws:iam::320131450129:instance-profile/dspass1").build())
+                    .securityGroupIds("sg-0eead8b108fc9f860")
                     .userData(Base64.getEncoder().encodeToString(getWorkerDataScript().getBytes()))
                     .tagSpecifications(tags)
                     .build();
@@ -344,7 +385,10 @@ public class Manager {
 
     //receiveDoneOcrTasks
     //receive all finished OCR tasks from workers, create summary file, and upload to s3 for LocalApp
-    public static void receiveDoneOcrTasks(int lines, String localId, String bucket, String worker2ManagerQUrl, String manager2LocalQUrl) {
+    public static void receiveDoneOcrTasks(int lines, String localId, String bucket, String worker2ManagerQUrl) {
+        //manager 2 local queue url = manager2LocalQUrl
+        String manager2LocalQUrl = getQueueRequestAndGetUrl(manager2LocalQ + localId);
+        printWithColor("get manager2local "+manager2LocalQUrl);
         int lineCount = lines;
         String output = "output" + localId + ".html";
         while (lineCount != 0) {
