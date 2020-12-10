@@ -8,9 +8,14 @@ import software.amazon.awssdk.services.s3.model.*;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.*;
 
+import java.io.IOException;
 import java.nio.file.Paths;
 import java.util.Base64;
 import java.util.List;
+import java.util.logging.FileHandler;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+import java.util.logging.SimpleFormatter;
 
 public class LocalApp {
 
@@ -19,8 +24,13 @@ public class LocalApp {
     private static SqsClient sqs;
     private static final String amiId = "ami-068dc7ca584573afe";
 
-        public static void main(String[] args) {
-
+        public static void main(String[] args) throws IOException {
+            Logger logger = Logger.getLogger(LocalApp.class.getName());//todo
+            FileHandler fileHandler = new FileHandler(logger.getName() + ".txt");
+            fileHandler.setFormatter(new SimpleFormatter());
+            logger.setLevel(Level.ALL);
+            logger.addHandler(fileHandler);
+            logger.info("start time");
         final String arguments =
                 "The application should be run as follows:\n" +
                         "java -jar yourjar.jar inputFileName outputFileName n terminate(optional)";
@@ -31,7 +41,7 @@ public class LocalApp {
         int filesRatio = Integer.parseInt(args[2]);
         Region region = Region.US_EAST_1;
         final String bucket = "bucket"+System.currentTimeMillis();
-        final String key = "input.txt";
+        final String key = input;
         final String local2ManagerQ = "local2ManagerQ";
         final String manager2LocalQ = "manager2LocalQ";
         final String localId = "local"+System.currentTimeMillis();
@@ -102,6 +112,7 @@ public class LocalApp {
             deleteBucket(bucket);
 
 //            */
+            logger.info("end time"); //todo
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -178,9 +189,9 @@ public class LocalApp {
                     .imageId(amiId)
                     .maxCount(1)
                     .minCount(1)
-                    .keyName("dspass1")
-                    .iamInstanceProfile(IamInstanceProfileSpecification.builder().arn("arn:aws:iam::320131450129:instance-profile/dspass1").build())
-                    .securityGroupIds("sg-0eead8b108fc9f860")
+                    .keyName("ass1")
+                    .iamInstanceProfile(IamInstanceProfileSpecification.builder().arn("arn:aws:iam::794818403225:instance-profile/ami-dsp211-ass1").build())
+                    .securityGroupIds("sg-0630dc054e0184c80")
                     .userData(Base64.getEncoder().encodeToString(getUserDataScript().getBytes()))
                     .instanceInitiatedShutdownBehavior("terminate")
                     .tagSpecifications(tags)
@@ -278,12 +289,12 @@ public class LocalApp {
   */
 
             s3.putObject(PutObjectRequest.builder()
-                            .bucket("dsp211-ass1-jar")
+                            .bucket("dsp211-ass1-jars")
                             .key("Worker.jar").acl(ObjectCannedACL.PUBLIC_READ)
                             .build(),
                     Paths.get("Worker.jar"));
             s3.putObject(PutObjectRequest.builder()
-                            .bucket("dsp211-ass1-jar")
+                            .bucket("dsp211-ass1-jars")
                             .key("Manager.jar").acl(ObjectCannedACL.PUBLIC_READ)
                             .build(),
                     Paths.get("Manager.jar"));
