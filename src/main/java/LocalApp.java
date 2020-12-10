@@ -270,7 +270,7 @@ public class LocalApp {
     }
 
     private static String getUserDataScript() {
-        final String bucket="dsp211-ass1-jars";
+        final String bucket="dsp211-ass1-jar";
         final String key="Manager.jar";
 
         return "#!/bin/bash\n"+
@@ -281,12 +281,11 @@ public class LocalApp {
 
     private static void uploadJars(){
         try {
-
-         /*   s3.createBucket(CreateBucketRequest
-                    .builder().bucket("dsp211-ass1-jars")
+///*
+           s3.createBucket(CreateBucketRequest
+                    .builder().bucket("dsp211-ass1-jar")
                     .createBucketConfiguration(CreateBucketConfiguration.builder().build()).build());
-                            //.locationConstraint(region.id()).build()).build());
-  */
+//  */
 
             s3.putObject(PutObjectRequest.builder()
                             .bucket("dsp211-ass1-jars")
