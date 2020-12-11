@@ -175,11 +175,11 @@ public class Manager {
 
 
             }
-            try {
-                Thread.sleep(1000); //todo
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
+//            try {
+//                Thread.sleep(5000); //todo
+//            } catch (InterruptedException e) {
+//                e.printStackTrace();
+//            }
         }
 
         //time to TERMINATE
@@ -210,8 +210,10 @@ public class Manager {
     private static List<Message> receiveMessages(String queueUrl,int pollNum,int waitTime) {
         ReceiveMessageRequest receiveRequest = ReceiveMessageRequest.builder()
                 .queueUrl(queueUrl)
+                .maxNumberOfMessages(1)
+                .visibilityTimeout(10)
+                .waitTimeSeconds(10)
                 //.maxNumberOfMessages(pollNum)
-                //.waitTimeSeconds(waitTime)
                 .build();
 
         return sqs.receiveMessage(receiveRequest).messages();
@@ -248,9 +250,9 @@ public class Manager {
                     .imageId(amiId)
                     .maxCount(neededWorkers)
                     .minCount(1)
-                    .keyName("ass1")
-                    .iamInstanceProfile(IamInstanceProfileSpecification.builder().arn("arn:aws:iam::794818403225:instance-profile/ami-dsp211-ass1").build())
-                    .securityGroupIds("sg-0630dc054e0184c80")
+                    .keyName("dspass1")
+                    .iamInstanceProfile(IamInstanceProfileSpecification.builder().arn("arn:aws:iam::320131450129:instance-profile/dspass1").build())
+                    .securityGroupIds("sg-0eead8b108fc9f860")
                     .userData(Base64.getEncoder().encodeToString(getWorkerDataScript().getBytes()))
                     .tagSpecifications(tags)
                     .build();
@@ -274,7 +276,7 @@ public class Manager {
     }
 
     private static String getWorkerDataScript() {
-        final String bucket = "dsp211-ass1-jars";
+        final String bucket = "dsp211-ass1-jar";
         final String key = "Worker.jar";
 
         return "#!/bin/bash\n" +
@@ -288,7 +290,7 @@ public class Manager {
         SendMessageRequest sendMessageRequest = SendMessageRequest.builder()
                 .queueUrl(queue)
                 .messageBody(new_image_task + "$" + localId + "$" + line)
-//                .delaySeconds(5)
+                .delaySeconds(0)
                 .build();
         sqs.sendMessage(sendMessageRequest);
     }
@@ -302,27 +304,19 @@ public class Manager {
         logger.info("start build summary file");
         int pollNum=10;
         int waitTime=1;
+        FileWriter writer = null;
+        try {
+            writer = new FileWriter(output, true);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
         while (lineCount != 0) {
-
-
             List<Message> messages =receiveMessages(worker2ManagerQUrl,pollNum,waitTime);
-            /*
-            if (messages.isEmpty()) {
-                if (pollNum != 1) {
-                    pollNum = 1;
-                    waitTime =20;
-                }
-            } else {
-                pollNum = 10;
-                waitTime = 1;
-            }
-            */
-
+            logger.info("receiving messages = " + messages.size());
             //read all done ocr tasks from worker2manager queue and append them all in output file
             for (Message m : messages) {
                 String body = m.body();
 //                logger.info("manager recieved message from worker: "+body);
-
                 //message from worker should be done_ocr_task$localId$URL$OCR
                 String[] splitMessage = body.split("\\$", 4);
                 String taskId = splitMessage[1];
@@ -330,10 +324,14 @@ public class Manager {
                 String ocr = splitMessage[3];
 //                logger.info("message split: "+taskId+" "+url+" "+ocr);
 //                logger.info("taskID: "+taskId+" localID: "+localId);
-
                 if (taskId.equals(localId)) {
                     logger.info("thread = " + Thread.currentThread().getId() + " added line to output ID = " + taskId);
-                    writeToOutput(output, url, ocr);
+//                    writeToOutput(output, url, ocr);
+                    try {
+                        writer.write("<p><img src=" + url + "></p>" + ocr + "<br>");
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
                     lineCount--;
                     DeleteMessageRequest deleteRequest = DeleteMessageRequest.builder()
                             .queueUrl(worker2ManagerQUrl)
@@ -341,14 +339,18 @@ public class Manager {
                             .build();
                     sqs.deleteMessage(deleteRequest);
                     logger.info("message from worker2ManagerQ deleted");
-
                 }
             }
-            try{  //todo
-                Thread.sleep(5000);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
+//            try{  //todo
+//                Thread.sleep(1000);
+//            } catch (InterruptedException e) {
+//                e.printStackTrace();
+//            }
+        }
+        try {
+            writer.close();
+        } catch (IOException e) {
+            e.printStackTrace();
         }
         logger.info("finish build summary file");
         //upload output summary file to s3 and send sqs message to localapp
@@ -360,12 +362,10 @@ public class Manager {
         SendMessageRequest messageRequest = SendMessageRequest.builder()
                 .queueUrl(manager2LocalQUrl)
                 .messageBody(done_task + "$" + localId)
-//                .delaySeconds(5)
+                .delaySeconds(0)
                 .build();
         sqs.sendMessage(messageRequest);
         logger.info("send message to manager2LocalQ: " + done_task + "$" + localId);
-
-
         //after output is uploaded to s3, delete it since we no longer need it
         File f = new File(output);
         f.delete();

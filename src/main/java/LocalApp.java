@@ -11,7 +11,9 @@ import software.amazon.awssdk.services.sqs.model.*;
 import java.io.IOException;
 import java.nio.file.Paths;
 import java.util.Base64;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.logging.FileHandler;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -80,6 +82,7 @@ public class LocalApp {
 
             while (!done) {
                 List<Message> messages = receiveMessages(m2l_qUrl);
+                logger.info("receving messages = " + messages.size());
                 for (Message m : messages) {
                     String[] bodyArr = m.body().split("\\$");
                     if (bodyArr[0].equals(done_task) && bodyArr[1].equals(localId)) {
@@ -88,16 +91,15 @@ public class LocalApp {
                         done = true;
                     }
                 }
-
 //                if (!managerIsActive() && !isOutputWaiting(bucket)) {
 //                    deleteBucketAndM2LQueue(manager2LocalQ + localId, bucket);
 //                    System.exit(1);
 //                }
-                try{
-                    Thread.sleep(1000);
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
+//                try{
+//                    Thread.sleep(5000);
+//                } catch (InterruptedException e) {
+//                    e.printStackTrace();
+//                }
             }
 
             s3.getObject(GetObjectRequest.builder().bucket(bucket).key("output" + outputS3Path + ".html").build(),
@@ -143,8 +145,11 @@ public class LocalApp {
 
 
     private static String createQueueRequestAndGetUrl(String queue) {
+        Map<QueueAttributeName, String> attributes = new HashMap<>();
+        attributes.put(QueueAttributeName.DELAY_SECONDS, "0");
         CreateQueueRequest request = CreateQueueRequest.builder()
                 .queueName(queue)
+                .attributes(attributes)
                 .build();
         sqs.createQueue(request);
         GetQueueUrlRequest getQueueRequest = GetQueueUrlRequest.builder()
@@ -157,7 +162,7 @@ public class LocalApp {
         SendMessageRequest send_msg_request = SendMessageRequest.builder()
                 .queueUrl(queueUrl)
                 .messageBody(message)
-//                .delaySeconds(5)
+                .delaySeconds(0)
                 .build();
         sqs.sendMessage(send_msg_request);
     }
@@ -165,6 +170,8 @@ public class LocalApp {
     private static List<Message> receiveMessages(String queueUrl) {
         ReceiveMessageRequest receiveRequest = ReceiveMessageRequest.builder()
                 .queueUrl(queueUrl)
+                .maxNumberOfMessages(1)
+                .waitTimeSeconds(10)
                 .build();
         return sqs.receiveMessage(receiveRequest).messages();
     }
@@ -194,9 +201,9 @@ public class LocalApp {
                     .imageId(amiId)
                     .maxCount(1)
                     .minCount(1)
-                    .keyName("ass1")
-                    .iamInstanceProfile(IamInstanceProfileSpecification.builder().arn("arn:aws:iam::794818403225:instance-profile/ami-dsp211-ass1").build())
-                    .securityGroupIds("sg-0630dc054e0184c80")
+                    .keyName("dspass1")
+                    .iamInstanceProfile(IamInstanceProfileSpecification.builder().arn("arn:aws:iam::320131450129:instance-profile/dspass1").build())
+                    .securityGroupIds("sg-0eead8b108fc9f860")
                     .userData(Base64.getEncoder().encodeToString(getUserDataScript().getBytes()))
                     .instanceInitiatedShutdownBehavior("terminate")
                     .tagSpecifications(tags)
@@ -275,7 +282,7 @@ public class LocalApp {
     }
 
     private static String getUserDataScript() {
-        final String bucket = "dsp211-ass1-jars";
+        final String bucket = "dsp211-ass1-jar";
         final String key = "Manager.jar";
 
         return "#!/bin/bash\n" +
@@ -288,18 +295,18 @@ public class LocalApp {
         try {
 /*
            s3.createBucket(CreateBucketRequest
-                    .builder().bucket("dsp211-ass1-jars")
+                    .builder().bucket("dsp211-ass1-jar")
                     .createBucketConfiguration(CreateBucketConfiguration.builder().build()).build());
 
   */
 
             s3.putObject(PutObjectRequest.builder()
-                            .bucket("dsp211-ass1-jars")
+                            .bucket("dsp211-ass1-jar")
                             .key("Manager.jar").acl(ObjectCannedACL.PUBLIC_READ)
                             .build(),
                     Paths.get("Manager.jar"));
             s3.putObject(PutObjectRequest.builder()
-                            .bucket("dsp211-ass1-jars")
+                            .bucket("dsp211-ass1-jar")
                             .key("Worker.jar").acl(ObjectCannedACL.PUBLIC_READ)
                             .build(),
                     Paths.get("Worker.jar"));

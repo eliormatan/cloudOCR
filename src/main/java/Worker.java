@@ -54,11 +54,6 @@ public class Worker {
                     logger.info("finish task+send+delete");
                 }
             }
-//            try{
-//                Thread.sleep(1000);
-//            } catch (InterruptedException e) {
-//                e.printStackTrace();
-//            }
         }
     }
 
@@ -79,6 +74,8 @@ public class Worker {
     private static List<Message> receiveMessages(String queueUrl) {
         ReceiveMessageRequest receiveRequest = ReceiveMessageRequest.builder()
                 .queueUrl(queueUrl)
+                .maxNumberOfMessages(1)
+                .waitTimeSeconds(10)
                 .build();
         return sqs.receiveMessage(receiveRequest).messages();
     }
@@ -95,7 +92,7 @@ public class Worker {
         SendMessageRequest send_msg_request = SendMessageRequest.builder()
                 .queueUrl(queueUrl)
                 .messageBody(message)
-//                .delaySeconds(5)
+                .delaySeconds(0)
                 .build();
         sqs.sendMessage(send_msg_request);
     }
