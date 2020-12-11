@@ -24,13 +24,13 @@ public class LocalApp {
     private static SqsClient sqs;
     private static final String amiId = "ami-068dc7ca584573afe";
 
-        public static void main(String[] args) throws IOException {
-            Logger logger = Logger.getLogger(LocalApp.class.getName());//todo
-            FileHandler fileHandler = new FileHandler(logger.getName() + ".txt");
-            fileHandler.setFormatter(new SimpleFormatter());
-            logger.setLevel(Level.ALL);
-            logger.addHandler(fileHandler);
-            logger.info("start time");
+    public static void main(String[] args) {
+        Logger logger = Logger.getLogger(LocalApp.class.getName());//todo
+//        FileHandler fileHandler = new FileHandler(logger.getName() + ".txt");
+//        fileHandler.setFormatter(new SimpleFormatter());
+        logger.setLevel(Level.ALL);
+//        logger.addHandler(fileHandler);
+        logger.info("start time");
         final String arguments =
                 "The application should be run as follows:\n" +
                         "java -jar yourjar.jar inputFileName outputFileName n terminate(optional)";
@@ -40,11 +40,11 @@ public class LocalApp {
         final String output = args[1];
         int filesRatio = Integer.parseInt(args[2]);
         Region region = Region.US_EAST_1;
-        final String bucket = "bucket"+System.currentTimeMillis();
+        final String bucket = "bucket" + System.currentTimeMillis();
         final String key = input;
         final String local2ManagerQ = "local2ManagerQ";
         final String manager2LocalQ = "manager2LocalQ";
-        final String localId = "local"+System.currentTimeMillis();
+        final String localId = "local" + System.currentTimeMillis();
         final String new_task = "new task";
         final String done_task = "done task";
         String outputS3Path = null;
@@ -64,20 +64,19 @@ public class LocalApp {
             createBucket(bucket);
             sqs = SqsClient.builder().region(region).build();
             String l2m_qUrl = createQueueRequestAndGetUrl(local2ManagerQ);
-            String m2l_qUrl = createQueueRequestAndGetUrl(manager2LocalQ+localId);
+            String m2l_qUrl = createQueueRequestAndGetUrl(manager2LocalQ + localId);
 
             s3.putObject(PutObjectRequest.builder().bucket(bucket).key(key).acl(ObjectCannedACL.PUBLIC_READ).build(),
                     Paths.get(input));
 
-            if(terminate){
+            if (terminate) {
                 sendMessage(l2m_qUrl, new_task + "$" + bucket + "$" + key + "$" + localId + "$" + filesRatio + "$" + "terminate");
 
-            }
-            else{
+            } else {
                 sendMessage(l2m_qUrl, new_task + "$" + bucket + "$" + key + "$" + localId + "$" + filesRatio);
             }
 
-            startManager();
+//            startManager();
 
             while (!done) {
                 List<Message> messages = receiveMessages(m2l_qUrl);
@@ -89,40 +88,46 @@ public class LocalApp {
                         done = true;
                     }
                 }
-                try {
-                    Thread.sleep(1000);
-                    try{
-                        GetQueueUrlRequest getQueueRequest = GetQueueUrlRequest.builder()
-                                .queueName(local2ManagerQ)
-                                .build();
-                        sqs.getQueueUrl(getQueueRequest).queueUrl();
-                    }catch (QueueDoesNotExistException e){
-                        deleteByCatch(manager2LocalQ+localId,bucket);
-                        System.exit(1);
-                    }
 
+//                if (!managerIsActive() && !isOutputWaiting(bucket)) {
+//                    deleteBucketAndM2LQueue(manager2LocalQ + localId, bucket);
+//                    System.exit(1);
+//                }
+                try{
+                    Thread.sleep(1000);
                 } catch (InterruptedException e) {
                     e.printStackTrace();
                 }
             }
 
-            s3.getObject(GetObjectRequest.builder().bucket(bucket).key("output"+outputS3Path+".html").build(),
-                    ResponseTransformer.toFile(Paths.get(localId+output)));
+            s3.getObject(GetObjectRequest.builder().bucket(bucket).key("output" + outputS3Path + ".html").build(),
+                    ResponseTransformer.toFile(Paths.get(localId + output)));
 
-            deleteBucket(bucket);
+            deleteBucketAndM2LQueue(manager2LocalQ + localId, bucket);
 
 //            */
             logger.info("end time"); //todo
 
-        } catch (Exception e) {
+        } catch (
+                Exception e) {
             e.printStackTrace();
             System.exit(1);
         }
+
     }
 
-    private static void deleteByCatch(String queue, String bucket) {
-            deleteSQSQueue(queue);
-            deleteBucket(bucket);
+    private static boolean isOutputWaiting(String bucket) {
+        boolean res=false;
+        ListObjectsV2Request listObjectsV2Request = ListObjectsV2Request.builder().bucket(bucket).build();
+        ListObjectsV2Response listObjectsV2Response=s3.listObjectsV2(listObjectsV2Request);
+        if(listObjectsV2Response.contents().size()==2)
+            res=true;
+        return res;
+    }
+
+    private static void deleteBucketAndM2LQueue(String queue, String bucket) {
+        deleteSQSQueue(queue);
+        deleteBucket(bucket);
     }
 
 
@@ -152,7 +157,7 @@ public class LocalApp {
         SendMessageRequest send_msg_request = SendMessageRequest.builder()
                 .queueUrl(queueUrl)
                 .messageBody(message)
-                .delaySeconds(5)
+//                .delaySeconds(5)
                 .build();
         sqs.sendMessage(send_msg_request);
     }
@@ -200,18 +205,19 @@ public class LocalApp {
             ec2.runInstances(runRequest);
         }
     }
+
     private static boolean managerIsActive() {
-        boolean isActive=false;
+        boolean isActive = false;
 
         try {
 
-           DescribeInstancesRequest request = DescribeInstancesRequest.builder()
-                            .filters(Filter.builder().name("tag:Manager").values("Manager").build(),Filter.builder().name("instance-state-name").values(new String[]{"running", "pending"}).build()).build();
+            DescribeInstancesRequest request = DescribeInstancesRequest.builder()
+                    .filters(Filter.builder().name("tag:Manager").values("Manager").build(), Filter.builder().name("instance-state-name").values(new String[]{"running", "pending"}).build()).build();
 
             DescribeInstancesResponse response = ec2.describeInstances(request);
-            if(!response.reservations().isEmpty())
-                isActive=true;
-            } catch (Ec2Exception e) {
+            if (!response.reservations().isEmpty())
+                isActive = true;
+        } catch (Ec2Exception e) {
             System.out.println(e.awsErrorDetails().errorMessage());
         }
 
@@ -240,7 +246,6 @@ public class LocalApp {
     }
 
 
-
     private static void deleteBucket(String bucket) {
         try {
             ListObjectsV2Request listObjectsV2Request = ListObjectsV2Request.builder().bucket(bucket).build();
@@ -259,7 +264,7 @@ public class LocalApp {
                         .continuationToken(listObjectsV2Response.nextContinuationToken())
                         .build();
 
-            } while(listObjectsV2Response.isTruncated());
+            } while (listObjectsV2Response.isTruncated());
             DeleteBucketRequest deleteBucketRequest = DeleteBucketRequest.builder().bucket(bucket).build();
             s3.deleteBucket(deleteBucketRequest);
 
@@ -270,35 +275,36 @@ public class LocalApp {
     }
 
     private static String getUserDataScript() {
-        final String bucket="dsp211-ass1-jar";
-        final String key="Manager.jar";
+        final String bucket = "dsp211-ass1-jars";
+        final String key = "Manager.jar";
 
-        return "#!/bin/bash\n"+
-                "wget https://" + bucket + ".s3.amazonaws.com/" + key +" -O " +key+ "\n" +
-                "java -jar "+key+"\n" +
+        return "#!/bin/bash\n" +
+                "wget https://" + bucket + ".s3.amazonaws.com/" + key + " -O " + key + "\n" +
+                "java -jar " + key + "\n" +
                 "shutdown now";
     }
 
-    private static void uploadJars(){
+    private static void uploadJars() {
         try {
-///*
+/*
            s3.createBucket(CreateBucketRequest
-                    .builder().bucket("dsp211-ass1-jar")
+                    .builder().bucket("dsp211-ass1-jars")
                     .createBucketConfiguration(CreateBucketConfiguration.builder().build()).build());
-//  */
 
-            s3.putObject(PutObjectRequest.builder()
-                            .bucket("dsp211-ass1-jars")
-                            .key("Worker.jar").acl(ObjectCannedACL.PUBLIC_READ)
-                            .build(),
-                    Paths.get("Worker.jar"));
+  */
+
             s3.putObject(PutObjectRequest.builder()
                             .bucket("dsp211-ass1-jars")
                             .key("Manager.jar").acl(ObjectCannedACL.PUBLIC_READ)
                             .build(),
                     Paths.get("Manager.jar"));
+            s3.putObject(PutObjectRequest.builder()
+                            .bucket("dsp211-ass1-jars")
+                            .key("Worker.jar").acl(ObjectCannedACL.PUBLIC_READ)
+                            .build(),
+                    Paths.get("Worker.jar"));
 
-        }catch (S3Exception e){
+        } catch (S3Exception e) {
             e.printStackTrace();
         }
     }

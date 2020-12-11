@@ -1,6 +1,7 @@
 import net.sourceforge.tess4j.Tesseract;
 import net.sourceforge.tess4j.TesseractException;
 import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.sqs.SqsAsyncClientBuilder;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.*;
 
@@ -10,6 +11,10 @@ import java.io.IOException;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.util.List;
+import java.util.logging.FileHandler;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+import java.util.logging.SimpleFormatter;
 
 public class Worker {
 
@@ -18,16 +23,22 @@ public class Worker {
     private static final String worker2ManagerQ = "worker2ManagerQ";
     private static final String new_image_task = "new image task";
     private static final String done_ocr_task = "done ocr task";
-
-
+    private static final Logger logger = Logger.getLogger(Worker.class.getName());
 
     public static void main(String[] args) {
+        try {
+            initLogger();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        logger.info("start time");
 
         Region region = Region.US_EAST_1;
         sqs = SqsClient.builder().region(region).build();
 
         String manager2WorkerQUrl = getQueueRequestAndGetUrl(manager2WorkerQ);
         String worker2ManagerQUrl = getQueueRequestAndGetUrl(worker2ManagerQ);
+
         while(true){
             List<Message> messages = receiveMessages(manager2WorkerQUrl);
             for (Message m : messages) {
@@ -36,14 +47,26 @@ public class Worker {
                 String localId = bodyArr[1];
                 String imageUrl = bodyArr[2];
                 if (task.equals(new_image_task)) {
+                    logger.info("start working on task");
                     String result=applyOCR(imageUrl);
-
                     sendMessage(worker2ManagerQUrl, done_ocr_task + "$" + localId + "$" + result);
                     deleteMessage(manager2WorkerQUrl, m);
-
+                    logger.info("finish task+send+delete");
                 }
             }
+//            try{
+//                Thread.sleep(1000);
+//            } catch (InterruptedException e) {
+//                e.printStackTrace();
+//            }
         }
+    }
+
+    private static void initLogger() throws IOException {
+        FileHandler fileHandler = new FileHandler("Logger" + ".txt");
+        fileHandler.setFormatter(new SimpleFormatter());
+        logger.setLevel(Level.ALL);
+        logger.addHandler(fileHandler);
     }
 
     private static String getQueueRequestAndGetUrl(String queue) {
@@ -72,7 +95,7 @@ public class Worker {
         SendMessageRequest send_msg_request = SendMessageRequest.builder()
                 .queueUrl(queueUrl)
                 .messageBody(message)
-                .delaySeconds(5)
+//                .delaySeconds(5)
                 .build();
         sqs.sendMessage(send_msg_request);
     }
