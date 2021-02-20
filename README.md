@@ -1,6 +1,5 @@
 # cloudOCR
 
-## Abstract 
 We built a distributed system, which shows by the three different components running on different machines, communicating and coordinating their actions through messages.
 This application perform OCR on given images in the cloud using AWS EC2 SQS S3 etc.
 The application will get as an input a text file containing a list of URLs of images. Then, instances will be launched in AWS (workers). Each worker will download image files, use some OCR library to identify text in those images (if any) and display the image with the text in a webpage.
