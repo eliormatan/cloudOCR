@@ -27,11 +27,8 @@ public class LocalApp {
     private static final String amiId = "ami-068dc7ca584573afe";
 
     public static void main(String[] args) {
-        Logger logger = Logger.getLogger(LocalApp.class.getName());//todo
-//        FileHandler fileHandler = new FileHandler(logger.getName() + ".txt");
-//        fileHandler.setFormatter(new SimpleFormatter());
+        Logger logger = Logger.getLogger(LocalApp.class.getName());
         logger.setLevel(Level.ALL);
-//        logger.addHandler(fileHandler);
         logger.info("start time");
         final String arguments =
                 "The application should be run as follows:\n" +
@@ -61,8 +58,6 @@ public class LocalApp {
 
 //            uploadJars();
 
-
-//            /*
             createBucket(bucket);
             sqs = SqsClient.builder().region(region).build();
             String l2m_qUrl = createQueueRequestAndGetUrl(local2ManagerQ);
@@ -78,7 +73,7 @@ public class LocalApp {
                 sendMessage(l2m_qUrl, new_task + "$" + bucket + "$" + key + "$" + localId + "$" + filesRatio);
             }
 
-//            startManager();
+           startManager();
 
             while (!done) {
                 List<Message> messages = receiveMessages(m2l_qUrl);
@@ -91,15 +86,15 @@ public class LocalApp {
                         done = true;
                     }
                 }
-//                if (!managerIsActive() && !isOutputWaiting(bucket)) {
-//                    deleteBucketAndM2LQueue(manager2LocalQ + localId, bucket);
-//                    System.exit(1);
-//                }
-//                try{
-//                    Thread.sleep(5000);
-//                } catch (InterruptedException e) {
-//                    e.printStackTrace();
-//                }
+               if (!managerIsActive() && !isOutputWaiting(bucket)) {
+                   deleteBucketAndM2LQueue(manager2LocalQ + localId, bucket);
+                   System.exit(1);
+               }
+               try{
+                   Thread.sleep(5000);
+               } catch (InterruptedException e) {
+                   e.printStackTrace();
+               }
             }
 
             s3.getObject(GetObjectRequest.builder().bucket(bucket).key("output" + outputS3Path + ".html").build(),
@@ -107,8 +102,7 @@ public class LocalApp {
 
             deleteBucketAndM2LQueue(manager2LocalQ + localId, bucket);
 
-//            */
-            logger.info("end time"); //todo
+            logger.info("end time"); 
 
         } catch (
                 Exception e) {
